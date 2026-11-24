@@ -242,6 +242,22 @@ describe("localAgentBridge", () => {
     expect(document.getElementById("uubridge-theme-override")?.textContent).toContain(".control-shell");
     expect(document.getElementById("uubridge-theme-override")?.textContent).toContain("--dark-panel: #ffffff");
 
+    // Verify frame_id progression alone does not spam /__uubridge/agent/state POSTs while idle
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const statePostsBefore = fetchMock.mock.calls.filter((call) => String(call[0]) === "/__uubridge/agent/state").length;
+    publishRemoteSessionState("dev-mac", {
+      appControlId: "ctrl-1",
+      connectionPath: "direct",
+      dataChannels: { control: "open", text: "open", file: "open" },
+      debugEvents: [],
+      remoteTrackCount: 1,
+      stage: "connected",
+      videoElement: { event: "playing", currentTimeMs: 2000, width: 1920, height: 1080, readyState: 4, totalVideoFrames: 999 },
+    });
+    await (runtime as unknown as { syncState(force: boolean): Promise<void> }).syncState(false);
+    const statePostsAfter = fetchMock.mock.calls.filter((call) => String(call[0]) === "/__uubridge/agent/state").length;
+    expect(statePostsAfter).toBe(statePostsBefore);
+
     runtime.stop();
   });
 });

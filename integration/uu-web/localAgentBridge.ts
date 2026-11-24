@@ -103,6 +103,16 @@ const PAGE_LAYOUT_POLISH_CSS = `
 .control-side-panel .tabs-panel {
   padding: 12px;
 }
+.control-side-panel .segmented-control {
+  gap: 3px;
+  padding: 4px;
+}
+.control-side-panel .segmented-control-label {
+  min-height: 28px;
+  padding: 0 3px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
 `;
 
 const PAGE_LIGHT_THEME_CSS = `
@@ -351,9 +361,12 @@ export class LocalAgentBridgeRuntime {
   private eventSource: EventSource | null = null;
   private reconnectTimer: number | null = null;
   private syncTimer: number | null = null;
+  private mountCheckRaf: number | null = null;
   private lastStateDigest = "";
+  private lastRenderKey = "";
   private lastSyncAt = 0;
   private snapshotSeq = 0;
+  private sampleCanvas: HTMLCanvasElement | null = null;
 
   private readonly policies = new Map<string, BrokerPolicy>();
   private readonly displayIndexByDevice = new Map<string, number>();
@@ -394,7 +407,7 @@ export class LocalAgentBridgeRuntime {
     this.connectEvents();
     this.syncTimer = window.setInterval(() => {
       void this.syncState(false);
-    }, 800);
+    }, 1500);
     window.addEventListener("beforeunload", () => {
       this.cleanup();
     });
@@ -404,6 +417,10 @@ export class LocalAgentBridgeRuntime {
     this.cleanup();
     this.domObserver?.disconnect();
     this.domObserver = null;
+    if (this.mountCheckRaf !== null) {
+      window.cancelAnimationFrame(this.mountCheckRaf);
+      this.mountCheckRaf = null;
+    }
     if (this.colorSchemeMedia && this.onColorSchemeChange) {
       this.colorSchemeMedia.removeEventListener?.("change", this.onColorSchemeChange);
     }
@@ -497,7 +514,7 @@ export class LocalAgentBridgeRuntime {
     return undefined;
   }
 
-  private findVideoElement(deviceId: string, displayIndex: number): HTMLVideoElement | null {
+  private findVideoElement(deviceId: string, displayIndex: number, allowOffscreen = true): HTMLVideoElement | null {
     const streams = getRemoteVideoStreams(deviceId);
     const chosen = streams[displayIndex] ?? streams[0];
     if (chosen) {
@@ -505,7 +522,8 @@ export class LocalAgentBridgeRuntime {
       for (const video of domVideos) {
         if (video.srcObject === chosen.stream) return video;
       }
-      // Fallback: maintain an offscreen video element for non-primary displays or background tabs.
+      if (!allowOffscreen) return null;
+      // Fallback: maintain an offscreen video element only when an Agent actively queries a background display.
       const cacheKey = `${deviceId}::${chosen.id}`;
       let offscreen = this.offscreenVideos.get(cacheKey);
       if (!offscreen || offscreen.srcObject !== chosen.stream) {
@@ -563,7 +581,7 @@ export class LocalAgentBridgeRuntime {
       const state = getRemoteSessionState(conn.deviceId);
       const streams = getRemoteVideoStreams(conn.deviceId);
       const activeIdx = Math.min(this.displayIndexByDevice.get(conn.deviceId) ?? 0, Math.max(0, streams.length - 1));
-      const video = this.findVideoElement(conn.deviceId, activeIdx);
+      const video = this.findVideoElement(conn.deviceId, activeIdx, false);
       const width = video?.videoWidth || state.videoElement?.width || state.inboundVideo?.frameWidth || 0;
       const height = video?.videoHeight || state.videoElement?.height || state.inboundVideo?.frameHeight || 0;
       const videoReady = Boolean((video && video.readyState >= 2 && width > 0 && height > 0) || (width > 0 && height > 0 && state.stage === "connected"));
@@ -606,9 +624,16 @@ export class LocalAgentBridgeRuntime {
   private async syncState(force: boolean): Promise<void> {
     if (!this.sseConnected) return;
     const sessions = this.collectSessionsSnapshot();
-    const digest = JSON.stringify(sessions);
+    // Exclude volatile per-frame counters from the change digest so idle video playback
+    // does not trigger nonstop state POSTs or Shadow DOM rebuilds.
+    const digest = JSON.stringify(
+      sessions.map((item) => {
+        const { frame_id: _frameId, ...structural } = item;
+        return structural;
+      }),
+    );
     const now = Date.now();
-    if (!force && digest === this.lastStateDigest && now - this.lastSyncAt < 8000) return;
+    if (!force && digest === this.lastStateDigest && now - this.lastSyncAt < 15000) return;
     this.lastStateDigest = digest;
     this.lastSyncAt = now;
 
@@ -721,9 +746,9 @@ export class LocalAgentBridgeRuntime {
   private sampleRegionFingerprint(video: HTMLVideoElement, region: RegionRect): FrameFingerprint {
     const w = Math.min(SAMPLE_WIDTH, Math.max(16, region.width));
     const h = Math.min(SAMPLE_HEIGHT, Math.max(16, region.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
+    const canvas = this.sampleCanvas ?? (this.sampleCanvas = document.createElement("canvas"));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new BridgeCommandError("INTERNAL_ERROR", "浏览器不支持 Canvas 2D 采样。");
     ctx.drawImage(video, region.x, region.y, region.width, region.height, 0, 0, w, h);
@@ -1434,10 +1459,22 @@ export class LocalAgentBridgeRuntime {
 
   private observeSidebarMount(): void {
     if (typeof MutationObserver === "undefined") return;
-    this.domObserver = new MutationObserver(() => {
-      const changed = this.syncMountPoint();
-      if (changed) this.renderBar();
-    });
+    const scheduleSync = () => {
+      // Fast short-circuit: already docked inside a connected sidebar panel.
+      if (
+        this.dockedInSidebar &&
+        this.uiHost?.parentElement?.isConnected &&
+        this.uiHost.parentElement.classList.contains("control-side-panel")
+      ) {
+        return;
+      }
+      if (this.mountCheckRaf !== null) return;
+      this.mountCheckRaf = window.requestAnimationFrame(() => {
+        this.mountCheckRaf = null;
+        if (this.syncMountPoint()) this.renderBar(true);
+      });
+    };
+    this.domObserver = new MutationObserver(scheduleSync);
     this.domObserver.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -1547,13 +1584,23 @@ export class LocalAgentBridgeRuntime {
       .join("")}</div>`;
   }
 
-  private renderBar(): void {
+  private renderBar(force = false): void {
     this.syncMountPoint();
     const root = this.uiRoot;
     if (!root) return;
     const policy = this.selectDisplayedPolicy();
     const isDark = this.getResolvedTheme() === "dark";
     const docked = this.dockedInSidebar;
+    const renderKey = JSON.stringify({
+      docked,
+      collapsed: this.uiCollapsed,
+      isDark,
+      themeMode: this.themeMode,
+      sseConnected: this.sseConnected,
+      policy,
+    });
+    if (!force && renderKey === this.lastRenderKey) return;
+    this.lastRenderKey = renderKey;
 
     const palette = isDark
       ? {

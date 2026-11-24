@@ -1,3 +1,632 @@
+diff --git a/frontend/src/app/remoteControlTypes.ts b/frontend/src/app/remoteControlTypes.ts
+index 6fd8f1d..5ff0005 100644
+--- a/frontend/src/app/remoteControlTypes.ts
++++ b/frontend/src/app/remoteControlTypes.ts
+@@ -27,6 +27,20 @@ export type ConnectionRouteMode = "auto" | "relay";
+ export type RemoteStageViewMode = "fit" | "fill";
+ export type RemoteAudioPlaybackState = "idle" | "waiting" | "playing" | "blocked" | "error";
+ 
++export type StreamQualityPreset = "auto" | "general" | "hd" | "bluray";
++export type StreamFpsCap = 60 | 90 | 144;
++export type StreamResolutionMode = "default" | "remote" | "local";
++export type StreamCodecPreference = "auto" | "hevc";
++
++export interface StreamPreferences {
++  quality: StreamQualityPreset;
++  fps: StreamFpsCap;
++  resolution: StreamResolutionMode;
++  codec: StreamCodecPreference;
++  chroma444: boolean;
++  lowLatency: boolean;
++}
++
+ export type RoomJoinContext = {
+   kind: RoomJoinKind;
+   deviceId: string;
+diff --git a/frontend/src/components/RemoteCommandBar.tsx b/frontend/src/components/RemoteCommandBar.tsx
+index 47c58cb..132712e 100644
+--- a/frontend/src/components/RemoteCommandBar.tsx
++++ b/frontend/src/components/RemoteCommandBar.tsx
+@@ -1,4 +1,4 @@
+-import { Eye, GripHorizontal, LoaderCircle, Maximize2, MousePointerClick, PlugZap, Scan } from "lucide-react";
++import { Camera, Eye, GripHorizontal, LoaderCircle, Maximize2, MousePointerClick, PlugZap, Scan } from "lucide-react";
+ import { useEffect, type RefObject } from "react";
+ 
+ import type { BusyAction, NextAction, RemoteStageViewMode } from "../app/remoteControlTypes.js";
+@@ -10,12 +10,14 @@ import type { FullscreenChromeHoverBindings } from "./useFullscreenChromeAutoHid
+ 
+ export interface RemoteCommandBarProps {
+   busy: BusyAction;
++  canSaveScreenshot?: boolean;
+   controlChannelState: RTCDataChannelState;
+   inputControlActive: boolean;
+   isFullscreen: boolean;
+   nextAction: NextAction;
+   onNextAction: () => void;
+   onRemoteShortcut: (shortcut: RemoteShortcut) => void;
++  onSaveScreenshot?: () => void;
+   onStageViewModeChange: (mode: RemoteStageViewMode) => void;
+   onToggleInputControl: () => void;
+   onToggleFullscreen: () => void;
+@@ -40,12 +42,14 @@ export interface RemoteCommandBarChromeProps {
+ 
+ export function RemoteCommandBar({
+   busy,
++  canSaveScreenshot = false,
+   controlChannelState,
+   inputControlActive,
+   isFullscreen,
+   nextAction,
+   onNextAction,
+   onRemoteShortcut,
++  onSaveScreenshot,
+   onStageViewModeChange,
+   onToggleInputControl,
+   onToggleFullscreen,
+@@ -145,6 +149,18 @@ export function RemoteCommandBar({
+           <Maximize2 size={17} />
+           {isFullscreen ? "退出全屏" : "全屏"}
+         </button>
++        {onSaveScreenshot ? (
++          <button
++            type="button"
++            onClick={onSaveScreenshot}
++            disabled={!canSaveScreenshot}
++            aria-label="保存当前画面截屏"
++            title="保存原始分辨率截屏到本地"
++          >
++            <Camera size={17} />
++            截屏
++          </button>
++        ) : null}
+         <RemoteShortcutMenu
+           disabled={!inputControlActive}
+           platformKey={remoteShortcutPlatform}
+diff --git a/frontend/src/components/RemoteControlSettingsDrawer.tsx b/frontend/src/components/RemoteControlSettingsDrawer.tsx
+index cee1ec6..45e18fd 100644
+--- a/frontend/src/components/RemoteControlSettingsDrawer.tsx
++++ b/frontend/src/components/RemoteControlSettingsDrawer.tsx
+@@ -1,8 +1,17 @@
+-import { CircleStop, LoaderCircle, Monitor, PlugZap } from "lucide-react";
++import { CircleStop, LoaderCircle, Monitor, PlugZap, RefreshCw } from "lucide-react";
+ 
+ import type { UuDevice, UuParticipantInfo } from "@uurc/shared/devices";
+ 
+-import type { BusyAction, ConnectionRouteMode, SdpTransportMode } from "../app/remoteControlTypes.js";
++import type {
++  BusyAction,
++  ConnectionRouteMode,
++  SdpTransportMode,
++  StreamCodecPreference,
++  StreamFpsCap,
++  StreamPreferences,
++  StreamQualityPreset,
++  StreamResolutionMode,
++} from "../app/remoteControlTypes.js";
+ import { ParticipantList } from "./ParticipantList.js";
+ import { AnimatedDisclosure } from "./ui/AnimatedDisclosure.js";
+ import { SegmentedControl } from "./ui/SegmentedControl.js";
+@@ -14,6 +23,8 @@ export interface RemoteControlSettingsDrawerProps {
+   busy: BusyAction;
+   connectionRouteMode: ConnectionRouteMode;
+   forceJoin: boolean;
++  hevcSupported: boolean;
++  onApplyStreamPreferences?: () => void;
+   onAutoConnectChange: (enabled: boolean) => void;
+   onConnectionRouteModeChange: (mode: ConnectionRouteMode) => void;
+   onForceJoinChange: (forceJoin: boolean) => void;
+@@ -22,11 +33,14 @@ export interface RemoteControlSettingsDrawerProps {
+   onStartBrowserRemote: () => void;
+   onStartSignalGateway: () => void;
+   onStopSignalGateway: () => void;
++  onStreamPreferencesChange: (patch: Partial<StreamPreferences>) => void;
+   sdpTransportMode: SdpTransportMode;
+   selectedDevice: UuDevice | null;
+   selectedParticipants: UuParticipantInfo[];
+   signalServerIndex: number;
+   signalServerOptions: string[];
++  streamPreferences: StreamPreferences;
++  streamPreferencesDirty?: boolean;
+ }
+ 
+ export function RemoteControlSettingsDrawer({
+@@ -35,6 +49,8 @@ export function RemoteControlSettingsDrawer({
+   busy,
+   connectionRouteMode,
+   forceJoin,
++  hevcSupported,
++  onApplyStreamPreferences,
+   onAutoConnectChange,
+   onConnectionRouteModeChange,
+   onForceJoinChange,
+@@ -43,14 +59,74 @@ export function RemoteControlSettingsDrawer({
+   onStartBrowserRemote,
+   onStartSignalGateway,
+   onStopSignalGateway,
++  onStreamPreferencesChange,
+   sdpTransportMode,
+   selectedDevice,
+   selectedParticipants,
+   signalServerIndex,
+   signalServerOptions,
++  streamPreferences,
++  streamPreferencesDirty = false,
+ }: RemoteControlSettingsDrawerProps) {
+   return (
+     <div className="control-settings-tab">
++      <div className="control-field">
++        <span className="control-field-label">画质策略</span>
++        <SegmentedControl<StreamQualityPreset>
++          name="streamQuality"
++          ariaLabel="画质策略"
++          value={streamPreferences.quality}
++          onChange={(quality) => onStreamPreferencesChange({ quality })}
++          options={[
++            { value: "auto", label: "跟随官方" },
++            { value: "general", label: "流畅" },
++            { value: "hd", label: "高清" },
++            { value: "bluray", label: "蓝光" },
++          ]}
++        />
++      </div>
++      <div className="control-field">
++        <span className="control-field-label">帧率上限</span>
++        <SegmentedControl<string>
++          name="streamFps"
++          ariaLabel="帧率上限"
++          value={String(streamPreferences.fps)}
++          onChange={(value) => onStreamPreferencesChange({ fps: Number(value) as StreamFpsCap })}
++          options={[
++            { value: "60", label: "60 fps" },
++            { value: "90", label: "90 fps" },
++            { value: "144", label: "144 fps" },
++          ]}
++        />
++      </div>
++      <div className="control-field">
++        <span className="control-field-label">分辨率</span>
++        <SegmentedControl<StreamResolutionMode>
++          name="streamResolution"
++          ariaLabel="分辨率策略"
++          value={streamPreferences.resolution}
++          onChange={(resolution) => onStreamPreferencesChange({ resolution })}
++          options={[
++            { value: "default", label: "跟随官方" },
++            { value: "remote", label: "远端原生" },
++            { value: "local", label: "匹配本机" },
++          ]}
++        />
++      </div>
++      {streamPreferencesDirty && onApplyStreamPreferences ? (
++        <div className="control-field">
++          <button
++            type="button"
++            className="primary-action-button"
++            onClick={onApplyStreamPreferences}
++            disabled={busy !== null}
++          >
++            {busy === "reconnect" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={15} />}
++            应用画面设置并重连
++          </button>
++        </div>
++      ) : null}
++
+       <Switch checked={autoConnect} label="进入设备自动连接" onChange={onAutoConnectChange} />
+       {selectedDevice ? (
+         <div className="control-field">
+@@ -79,6 +155,29 @@ export function RemoteControlSettingsDrawer({
+         contentClassName="control-subdrawer-content"
+         summary="高级设置（调试用）"
+       >
++        <Switch
++          checked={streamPreferences.lowLatency}
++          label="低延迟播放缓冲（直连推荐）"
++          onChange={(lowLatency) => onStreamPreferencesChange({ lowLatency })}
++        />
++        <div className="control-field">
++          <span className="control-field-label">视频编码</span>
++          <SegmentedControl<StreamCodecPreference>
++            name="streamCodec"
++            ariaLabel="视频编码"
++            value={hevcSupported ? streamPreferences.codec : "auto"}
++            onChange={(codec) => onStreamPreferencesChange({ codec: hevcSupported ? codec : "auto" })}
++            options={[
++              { value: "auto", label: "自动 (H.264)" },
++              { value: "hevc", label: hevcSupported ? "优先 H.265" : "H.265 不可用" },
++            ]}
++          />
++        </div>
++        <Switch
++          checked={streamPreferences.chroma444}
++          label="真彩 4:4:4（需账号与被控端支持）"
++          onChange={(chroma444) => onStreamPreferencesChange({ chroma444 })}
++        />
+         <div className="transport-actions">
+           <button onClick={onStartSignalGateway} disabled={busy !== null}>
+             {busy === "signal-start" ? <LoaderCircle className="spin" size={17} /> : <PlugZap size={17} />}
+diff --git a/frontend/src/components/ui/SegmentedControl.tsx b/frontend/src/components/ui/SegmentedControl.tsx
+index 5fc57ac..811bf84 100644
+--- a/frontend/src/components/ui/SegmentedControl.tsx
++++ b/frontend/src/components/ui/SegmentedControl.tsx
+@@ -26,7 +26,11 @@ export function SegmentedControl<T extends string>({
+ 
+   return (
+     <LayoutGroup id={controlId}>
+-      <fieldset className="segmented-control" aria-label={ariaLabel}>
++      <fieldset
++        className="segmented-control"
++        aria-label={ariaLabel}
++        style={options.length !== 2 ? { gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` } : undefined}
++      >
+         {options.map((option) => {
+           const selected = value === option.value;
+ 
+diff --git a/frontend/src/controllers/useBrowserRemoteSessionController.ts b/frontend/src/controllers/useBrowserRemoteSessionController.ts
+index 897a656..821b9cb 100644
+--- a/frontend/src/controllers/useBrowserRemoteSessionController.ts
++++ b/frontend/src/controllers/useBrowserRemoteSessionController.ts
+@@ -1,9 +1,25 @@
+-import { buildDefaultStreamerConnectOptionsBase64 } from "@uurc/shared/streamer/connectOptions";
+-import { STREAMER_CLIENT_TYPES, STREAMER_CONTROL_CONNECT_TYPES } from "@uurc/shared/streamer/connectOptionsModel";
+-import { buildStreamerControlStreamerDataJson } from "@uurc/shared/streamer/controlConfig";
++import {
++  STREAMER_CHOOSE_RESOLUTION_TYPES,
++  STREAMER_CHROMA_FORMATS,
++  STREAMER_FPS_VALUES,
++  STREAMER_VIDEO_QUALITY_VALUES,
++  buildDefaultStreamerConnectOptionsBase64,
++  buildStreamerBrowserDecoderCapList,
++} from "@uurc/shared/streamer/connectOptions";
++import {
++  STREAMER_CLIENT_TYPES,
++  STREAMER_CONTROL_CONNECT_TYPES,
++  type StreamerScreenResolutionInput,
++} from "@uurc/shared/streamer/connectOptionsModel";
++import {
++  buildStreamerBrowserDeviceCapabilityWithOptions,
++  buildStreamerControlStreamerDataJson,
++} from "@uurc/shared/streamer/controlConfig";
+ import { useCallback, useMemo } from "react";
+ 
++import type { StreamPreferences } from "../app/remoteControlTypes.js";
+ import { sendRemoteSignalControl, sendRemoteSignalSoac } from "../api/remoteSignalApi.js";
++import { browserSupportsHevcWebRtc, getBrowserVideoCodecPreferences } from "../remote/browserRemote/negotiation.js";
+ import { BrowserRemoteSession } from "../remote/browserRemoteSession.js";
+ import type { BrowserRemoteSessionState } from "../remote/browserRemoteSessionTypes.js";
+ import { REMOTE_CURSOR_LOCAL_RENDERING_ENABLED } from "../remote/remoteCursor.js";
+@@ -26,9 +42,47 @@ interface StartBrowserRemoteSessionInput {
+   forceRelay: boolean | undefined;
+   gzipSdp: boolean;
+   remoteAssistance: boolean;
++  streamPreferences?: StreamPreferences;
+   targetPlatform: number | undefined;
+ }
+ 
++function resolveBrowserLocalResolution(): StreamerScreenResolutionInput {
++  if (typeof window === "undefined" || !window.screen) return { width: 1920, height: 1080 };
++  const dpr = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
++  const rawW = Math.round((window.screen.width || 0) * dpr);
++  const rawH = Math.round((window.screen.height || 0) * dpr);
++  if (rawW < 640 || rawH < 360) return { width: 1920, height: 1080 };
++  const width = Math.min(3840, Math.max(1280, rawW - (rawW % 2)));
++  const height = Math.min(2160, Math.max(720, rawH - (rawH % 2)));
++  return { width, height };
++}
++
++function mapQualityEnum(quality: StreamPreferences["quality"]): number {
++  switch (quality) {
++    case "auto":
++      return STREAMER_VIDEO_QUALITY_VALUES.VideoQuality_Auto;
++    case "general":
++      return STREAMER_VIDEO_QUALITY_VALUES.VideoQuality_General;
++    case "bluray":
++      return STREAMER_VIDEO_QUALITY_VALUES.VideoQuality_Bluray;
++    case "hd":
++    default:
++      return STREAMER_VIDEO_QUALITY_VALUES.VideoQuality_HD;
++  }
++}
++
++function mapFpsEnum(fps: StreamPreferences["fps"]): number {
++  if (fps === 144) return STREAMER_FPS_VALUES.FPS_144;
++  if (fps === 90) return STREAMER_FPS_VALUES.FPS_90;
++  return STREAMER_FPS_VALUES.FPS_60;
++}
++
++function mapResolutionEnum(mode: StreamPreferences["resolution"]): number {
++  if (mode === "remote") return STREAMER_CHOOSE_RESOLUTION_TYPES.ChooseType_FOLLOW_REMOTE;
++  if (mode === "local") return STREAMER_CHOOSE_RESOLUTION_TYPES.ChooseType_FOLLOW_LOCAL;
++  return STREAMER_CHOOSE_RESOLUTION_TYPES.ChooseType_DEFAULT;
++}
++
+ /**
+  * 浏览器远控会话控制器（每台设备一份）。
+  *
+@@ -76,11 +130,19 @@ export function useBrowserRemoteSessionController(targetDeviceId: string) {
+       if (superseded) archiveRemoteDebugEvents(targetDeviceId, superseded.close().debugEvents);
+ 
+       const appControlId = createAppControlId();
++      const prefs = input.streamPreferences;
++      const includeHevc = prefs?.codec === "hevc" && browserSupportsHevcWebRtc();
++      const targetFps = prefs?.fps ?? 60;
++      const chromaFormat = prefs?.chroma444
++        ? STREAMER_CHROMA_FORMATS.ChromaFormat_444
++        : STREAMER_CHROMA_FORMATS.ChromaFormat_420;
++      const localResolution = prefs ? resolveBrowserLocalResolution() : undefined;
+       const session = new BrowserRemoteSession({
+         api: {
+           sendSignalControl: sendRemoteSignalControl,
+           sendSignalSoac: sendRemoteSignalSoac,
+         },
++        getVideoCodecPreferences: () => getBrowserVideoCodecPreferences(includeHevc ? "hevc" : "auto"),
+         initialDebugEvents: attachRemoteSession(targetDeviceId, null),
+         /*
+          * 远端流 / 剪贴板 / 光标一律走按设备分片的模块级分发器，**不要**闭包到
+@@ -104,10 +166,36 @@ export function useBrowserRemoteSessionController(targetDeviceId: string) {
+             ? STREAMER_CONTROL_CONNECT_TYPES.ControlConnectType_Assistance
+             : STREAMER_CONTROL_CONNECT_TYPES.ControlConnectType_Normal,
+           cursorCapture: !REMOTE_CURSOR_LOCAL_RENDERING_ENABLED,
++          ...(prefs
++            ? {
++                fps: mapFpsEnum(prefs.fps),
++                fpsCount: targetFps > 60 ? targetFps : undefined,
++                videoQuality: mapQualityEnum(prefs.quality),
++                chooseResolutionType: mapResolutionEnum(prefs.resolution),
++                localResolution,
++                chromaFormat: prefs.chroma444 ? STREAMER_CHROMA_FORMATS.ChromaFormat_444 : undefined,
++                decoderCapList: buildStreamerBrowserDecoderCapList({
++                  fps: targetFps,
++                  chromaFormat,
++                  includeHevc,
++                }),
++                virtualDisplayModes: [{ ...(localResolution ?? { width: 1920, height: 1080 }), fps: targetFps }],
++              }
++            : {}),
++        }),
++        streamerData: buildStreamerControlStreamerDataJson({
++          controlId: appControlId,
++          deviceCapability: prefs
++            ? buildStreamerBrowserDeviceCapabilityWithOptions({
++                fps: targetFps,
++                chromaSampling: chromaFormat,
++                includeHevc,
++              })
++            : undefined,
+         }),
+-        streamerData: buildStreamerControlStreamerDataJson({ controlId: appControlId }),
+         forceRelay: input.forceRelay,
+         gzipSdp: input.gzipSdp,
++        lowLatencyVideo: prefs ? prefs.lowLatency : true,
+         targetPlatform: input.targetPlatform,
+       });
+       publishRemoteSessionState(targetDeviceId, sessionState);
+diff --git a/frontend/src/controllers/useRemoteControlController.ts b/frontend/src/controllers/useRemoteControlController.ts
+index 2a9a60c..9adb9c3 100644
+--- a/frontend/src/controllers/useRemoteControlController.ts
++++ b/frontend/src/controllers/useRemoteControlController.ts
+@@ -82,8 +82,13 @@ export function useRemoteControlController(context: RemoteControlContext) {
+     setRemoteStageViewMode,
+     signalServerIndex,
+     setSignalServerIndex,
++    streamPreferences,
++    updateStreamPreferences,
++    hevcSupported,
+     browserWebRtcUnavailableReason,
+   } = useRemoteControlPreferences(remoteBootstrap?.signalServers.length ?? 0);
++  const [appliedStreamPreferencesKey, setAppliedStreamPreferencesKey] = useState("");
++  const currentStreamPreferencesKey = JSON.stringify(streamPreferences);
+   const {
+     signalGatewayContext,
+     setSignalGatewayContext,
+@@ -384,11 +389,57 @@ export function useRemoteControlController(context: RemoteControlContext) {
+       forceRelay: options.forceRelay ?? (connectionRouteMode === "relay" ? true : undefined),
+       gzipSdp: sdpTransportMode === "gzip",
+       remoteAssistance: roomJoinContext?.kind === "remote_assistance",
++      streamPreferences,
+       targetPlatform,
+     });
++    setAppliedStreamPreferencesKey(JSON.stringify(streamPreferences));
+     await refreshSignalEvents(session);
+   }
+ 
++  function handleSaveScreenshot(): void {
++    const video =
++      document.querySelector<HTMLVideoElement>('video.remote-video[data-active="true"]') ??
++      document.querySelector<HTMLVideoElement>("video.remote-video");
++    if (!video || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
++      showToast("画面尚未就绪，暂时无法截屏");
++      return;
++    }
++    const canvas = document.createElement("canvas");
++    canvas.width = video.videoWidth;
++    canvas.height = video.videoHeight;
++    const ctx = canvas.getContext("2d");
++    if (!ctx) {
++      showToast("当前浏览器不支持导出截屏");
++      return;
++    }
++    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
++    const pad = (n: number) => String(n).padStart(2, "0");
++    const now = new Date();
++    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
++    const filename = `uu-screenshot-${stamp}.png`;
++    const triggerDownload = (url: string, revoke: boolean) => {
++      const link = document.createElement("a");
++      link.href = url;
++      link.download = filename;
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++      if (revoke) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
++      showToast(`已保存截屏（${canvas.width}×${canvas.height}）`);
++    };
++    if (typeof canvas.toBlob === "function") {
++      canvas.toBlob((blob) => {
++        if (!blob) {
++          showToast("截屏导出失败");
++          return;
++        }
++        triggerDownload(URL.createObjectURL(blob), true);
++      }, "image/png");
++      return;
++    }
++    triggerDownload(canvas.toDataURL("image/png"), false);
++  }
++
+   async function handleStartBrowserRemote(options: { skipReadinessCheck?: boolean } = {}) {
+     await run("browser-remote-start", async () => {
+       await startBrowserRemoteSession(options);
+@@ -609,12 +660,14 @@ export function useRemoteControlController(context: RemoteControlContext) {
+     },
+     commandBar: {
+       busy,
++      canSaveScreenshot: hasRemoteVideo,
+       controlChannelState,
+       inputControlActive,
+       isFullscreen,
+       nextAction,
+       onNextAction: () => void handleNextAction(),
+       onRemoteShortcut: handleRemoteShortcut,
++      onSaveScreenshot: handleSaveScreenshot,
+       onStageViewModeChange: setRemoteStageViewMode,
+       onToggleInputControl: handleToggleInputControl,
+       onToggleFullscreen: handleToggleFullscreen,
+@@ -695,6 +748,8 @@ export function useRemoteControlController(context: RemoteControlContext) {
+       busy,
+       connectionRouteMode,
+       forceJoin,
++      hevcSupported,
++      onApplyStreamPreferences: () => void handleReconnectRemote(0),
+       onAutoConnectChange: setAutoConnect,
+       onConnectionRouteModeChange: setConnectionRouteMode,
+       onForceJoinChange: setForceJoin,
+@@ -703,11 +758,17 @@ export function useRemoteControlController(context: RemoteControlContext) {
+       onStartBrowserRemote: () => void handleStartBrowserRemote(),
+       onStartSignalGateway: () => void handleStartSignalGateway(),
+       onStopSignalGateway: () => void handleStopSignalGateway(),
++      onStreamPreferencesChange: updateStreamPreferences,
+       sdpTransportMode,
+       selectedDevice,
+       selectedParticipants,
+       signalServerIndex,
+       signalServerOptions,
++      streamPreferences,
++      streamPreferencesDirty:
++        browserRemoteState.stage === "connected" &&
++        appliedStreamPreferencesKey !== "" &&
++        appliedStreamPreferencesKey !== currentStreamPreferencesKey,
+     },
+     diagnostics: {
+       audioPlaybackLabel,
+diff --git a/frontend/src/controllers/useRemoteControlPreferences.ts b/frontend/src/controllers/useRemoteControlPreferences.ts
+index a2d2033..73cd982 100644
+--- a/frontend/src/controllers/useRemoteControlPreferences.ts
++++ b/frontend/src/controllers/useRemoteControlPreferences.ts
+@@ -1,6 +1,27 @@
+-import { useEffect, useState } from "react";
++import { useCallback, useEffect, useState } from "react";
+ 
+-import type { ConnectionRouteMode, RemoteStageViewMode, SdpTransportMode } from "../app/remoteControlTypes.js";
++import type {
++  ConnectionRouteMode,
++  RemoteStageViewMode,
++  SdpTransportMode,
++  StreamCodecPreference,
++  StreamFpsCap,
++  StreamPreferences,
++  StreamQualityPreset,
++  StreamResolutionMode,
++} from "../app/remoteControlTypes.js";
++import { browserSupportsHevcWebRtc } from "../remote/browserRemote/negotiation.js";
++
++const STREAM_PREFERENCES_STORAGE_KEY = "uurc.streamPreferences";
++
++export const DEFAULT_STREAM_PREFERENCES: StreamPreferences = {
++  quality: "auto",
++  fps: 60,
++  resolution: "default",
++  codec: "auto",
++  chroma444: false,
++  lowLatency: true,
++};
+ 
+ export function useRemoteControlPreferences(signalServerCount: number) {
+   const [autoReconnectEnabled, setAutoReconnectEnabled] = useState(true);
+@@ -9,6 +30,8 @@ export function useRemoteControlPreferences(signalServerCount: number) {
+   const [autoConnect, setAutoConnect] = useState<boolean>(readAutoConnectPreference);
+   const [remoteStageViewMode, setRemoteStageViewMode] = useState<RemoteStageViewMode>("fit");
+   const [signalServerIndex, setSignalServerIndex] = useState(0);
++  const [streamPreferences, setStreamPreferences] = useState<StreamPreferences>(readStreamPreferences);
++  const [hevcSupported] = useState(browserSupportsHevcWebRtc);
+   const [browserWebRtcUnavailableReason] = useState(detectBrowserWebRtcUnavailableReason);
+ 
+   useEffect(() => {
+@@ -25,6 +48,18 @@ export function useRemoteControlPreferences(signalServerCount: number) {
+     }
+   }, [autoConnect]);
+ 
++  useEffect(() => {
++    try {
++      globalThis.localStorage?.setItem(STREAM_PREFERENCES_STORAGE_KEY, JSON.stringify(streamPreferences));
++    } catch {
++      // Ignore persistence failures in private or sandboxed browser contexts.
++    }
++  }, [streamPreferences]);
++
++  const updateStreamPreferences = useCallback((patch: Partial<StreamPreferences>) => {
++    setStreamPreferences((current) => ({ ...current, ...patch }));
++  }, []);
++
+   return {
+     autoReconnectEnabled,
+     setAutoReconnectEnabled,
+@@ -38,6 +73,9 @@ export function useRemoteControlPreferences(signalServerCount: number) {
+     setRemoteStageViewMode,
+     signalServerIndex,
+     setSignalServerIndex,
++    streamPreferences,
++    updateStreamPreferences,
++    hevcSupported,
+     browserWebRtcUnavailableReason,
+   };
+ }
+@@ -50,6 +88,36 @@ function readAutoConnectPreference(): boolean {
+   }
+ }
+ 
++function readStreamPreferences(): StreamPreferences {
++  try {
++    const raw = globalThis.localStorage?.getItem(STREAM_PREFERENCES_STORAGE_KEY);
++    if (!raw) return DEFAULT_STREAM_PREFERENCES;
++    const parsed = JSON.parse(raw) as Partial<Record<keyof StreamPreferences, unknown>>;
++    const quality: StreamQualityPreset =
++      parsed.quality === "auto" || parsed.quality === "general" || parsed.quality === "hd" || parsed.quality === "bluray"
++        ? parsed.quality
++        : DEFAULT_STREAM_PREFERENCES.quality;
++    const fps: StreamFpsCap =
++      parsed.fps === 60 || parsed.fps === 90 || parsed.fps === 144 ? parsed.fps : DEFAULT_STREAM_PREFERENCES.fps;
++    const resolution: StreamResolutionMode =
++      parsed.resolution === "default" || parsed.resolution === "remote" || parsed.resolution === "local"
++        ? parsed.resolution
++        : DEFAULT_STREAM_PREFERENCES.resolution;
++    const codec: StreamCodecPreference =
++      parsed.codec === "auto" || parsed.codec === "hevc" ? parsed.codec : DEFAULT_STREAM_PREFERENCES.codec;
++    return {
++      quality,
++      fps,
++      resolution,
++      codec,
++      chroma444: typeof parsed.chroma444 === "boolean" ? parsed.chroma444 : DEFAULT_STREAM_PREFERENCES.chroma444,
++      lowLatency: typeof parsed.lowLatency === "boolean" ? parsed.lowLatency : DEFAULT_STREAM_PREFERENCES.lowLatency,
++    };
++  } catch {
++    return DEFAULT_STREAM_PREFERENCES;
++  }
++}
++
+ function detectBrowserWebRtcUnavailableReason(): string {
+   if (typeof RTCPeerConnection !== "function") {
+     return "当前浏览器未启用 WebRTC，无法建立远控画面。请允许 WebRTC 后重试。";
 diff --git a/frontend/src/controllers/useRemoteInputController.ts b/frontend/src/controllers/useRemoteInputController.ts
 index aafd2da..c5487ec 100644
 --- a/frontend/src/controllers/useRemoteInputController.ts
@@ -70,11 +699,72 @@ index aa68bc1..62755df 100644
  }
 +
 +void startLocalAgentBridge();
+diff --git a/frontend/src/remote/browserRemote/negotiation.ts b/frontend/src/remote/browserRemote/negotiation.ts
+index 769e5ae..5a82ab5 100644
+--- a/frontend/src/remote/browserRemote/negotiation.ts
++++ b/frontend/src/remote/browserRemote/negotiation.ts
+@@ -80,15 +80,44 @@ export function createMediaStream(): MediaStream | null {
+   return typeof MediaStream === "undefined" ? null : new MediaStream();
+ }
+ 
+-export function getBrowserH264CodecPreferences(): RTCRtpCodec[] {
+-  if (typeof RTCRtpSender === "undefined" || typeof RTCRtpSender.getCapabilities !== "function") return [];
+-  const codecs = RTCRtpSender.getCapabilities("video")?.codecs ?? [];
++function readBrowserVideoCapabilities(): RTCRtpCodec[] {
++  if (typeof RTCRtpReceiver !== "undefined" && typeof RTCRtpReceiver.getCapabilities === "function") {
++    const receiverCodecs = RTCRtpReceiver.getCapabilities("video")?.codecs;
++    if (receiverCodecs && receiverCodecs.length > 0) return receiverCodecs;
++  }
++  if (typeof RTCRtpSender !== "undefined" && typeof RTCRtpSender.getCapabilities === "function") {
++    return RTCRtpSender.getCapabilities("video")?.codecs ?? [];
++  }
++  return [];
++}
++
++export function browserSupportsHevcWebRtc(): boolean {
++  return readBrowserVideoCapabilities().some((codec) => {
++    const mime = codec.mimeType.toLowerCase();
++    return mime === "video/h265" || mime === "video/hevc";
++  });
++}
++
++export function getBrowserVideoCodecPreferences(preference: "auto" | "hevc" = "auto"): RTCRtpCodec[] {
++  const codecs = readBrowserVideoCapabilities();
++  if (codecs.length === 0) return [];
+   const h264Codecs = codecs.filter((codec) => codec.mimeType.toLowerCase() === "video/h264");
+-  if (h264Codecs.length === 0) return [];
++  const h265Codecs = codecs.filter((codec) => {
++    const mime = codec.mimeType.toLowerCase();
++    return mime === "video/h265" || mime === "video/hevc";
++  });
+   const rtxCodecs = codecs.filter((codec) => codec.mimeType.toLowerCase() === "video/rtx");
++  if (preference === "hevc" && h265Codecs.length > 0) {
++    return [...h265Codecs, ...h264Codecs, ...rtxCodecs];
++  }
++  if (h264Codecs.length === 0) return [];
+   return [...h264Codecs, ...rtxCodecs];
+ }
+ 
++export function getBrowserH264CodecPreferences(): RTCRtpCodec[] {
++  return getBrowserVideoCodecPreferences("auto");
++}
++
+ export function applyVideoCodecPreferences(transceiver: RTCRtpTransceiver, codecs: RTCRtpCodec[]): void {
+   if (codecs.length === 0 || typeof transceiver.setCodecPreferences !== "function") return;
+   try {
 diff --git a/frontend/src/remote/browserRemoteSession.ts b/frontend/src/remote/browserRemoteSession.ts
-index 8180ce5..a7e8934 100644
+index 8180ce5..5f8c107 100644
 --- a/frontend/src/remote/browserRemoteSession.ts
 +++ b/frontend/src/remote/browserRemoteSession.ts
-@@ -158,6 +158,10 @@ export class BrowserRemoteSession {
+@@ -77,6 +77,7 @@ export class BrowserRemoteSession {
+   private clientId: string | undefined;
+   private iceId: string | undefined;
+   private gzipSdp = true;
++  private lowLatencyVideo = false;
+   private iceNetworkType: StreamerIceNetworkType = STREAMER_ICE_NETWORK_TYPES.appAuto;
+   private targetPlatform: number | undefined;
+   private readonly processedSignalEventIds = new Set<number>();
+@@ -158,6 +159,10 @@ export class BrowserRemoteSession {
      return Math.floor(this.now() / 1000);
    }
  
@@ -85,6 +775,77 @@ index 8180ce5..a7e8934 100644
    getState(): BrowserRemoteSessionState {
      return {
        ...this.state,
+@@ -259,6 +264,7 @@ export class BrowserRemoteSession {
+     this.clientId = result.clientId;
+     this.iceId = result.iceId ?? input.iceId;
+     this.gzipSdp = input.gzipSdp ?? true;
++    this.lowLatencyVideo = input.lowLatencyVideo === true && input.forceRelay !== true;
+     this.iceNetworkType = input.iceNetworkType ?? STREAMER_ICE_NETWORK_TYPES.appAuto;
+     this.targetPlatform = input.targetPlatform;
+     this.processedSignalEventIds.clear();
+@@ -819,6 +825,18 @@ export class BrowserRemoteSession {
+   }
+ 
+   private applyRemoteTrack(event: RTCTrackEvent): void {
++    if (this.lowLatencyVideo && event.track.kind === "video" && event.receiver) {
++      const receiver = event.receiver as unknown as Record<string, unknown>;
++      try {
++        if ("jitterBufferTarget" in receiver) {
++          receiver.jitterBufferTarget = 0;
++        } else if ("playoutDelayHint" in receiver) {
++          receiver.playoutDelayHint = 0;
++        }
++      } catch {
++        // Low-latency buffer hint is optional; browser defaults remain usable if rejected.
++      }
++    }
+     const stream = this.remoteStream ?? createMediaStream() ?? event.streams[0];
+     if (!stream) return;
+     const tracks = typeof stream.getTracks === "function" ? stream.getTracks() : [];
+diff --git a/frontend/src/remote/browserRemoteSessionTypes.ts b/frontend/src/remote/browserRemoteSessionTypes.ts
+index 87c4a6a..8f5ae44 100644
+--- a/frontend/src/remote/browserRemoteSessionTypes.ts
++++ b/frontend/src/remote/browserRemoteSessionTypes.ts
+@@ -77,6 +77,7 @@ export interface BrowserRemoteSessionStartInput extends RemoteSignalControlReque
+   iceNetworkType?: StreamerIceNetworkType;
+   forceRelay?: boolean;
+   gzipSdp?: boolean;
++  lowLatencyVideo?: boolean;
+   targetPlatform?: number;
+ }
+ 
+diff --git a/frontend/src/remote/remoteConnectionQuality.ts b/frontend/src/remote/remoteConnectionQuality.ts
+index c564a9c..16dab3c 100644
+--- a/frontend/src/remote/remoteConnectionQuality.ts
++++ b/frontend/src/remote/remoteConnectionQuality.ts
+@@ -70,7 +70,10 @@ function buildConnectionQualityMetrics(input: ConnectionQualityInput): RemoteCon
+     },
+     { label: "下行余量", value: formatBitrate(pair?.availableIncomingBitrate) ?? "暂无" },
+     { label: "上行余量", value: formatBitrate(pair?.availableOutgoingBitrate) ?? "暂无" },
+-    { label: "解码器", value: stats?.decoderImplementation ?? "暂无" },
++    {
++      label: "解码器",
++      value: formatDecoderSummary(stats?.codecMimeType, stats?.decoderImplementation, stats?.powerEfficientDecoder) ?? "暂无",
++    },
+   ];
+ }
+ 
+@@ -143,3 +146,15 @@ function formatCompactNumber(value: number): string {
+   const rounded = value >= 10 ? Math.round(value * 10) / 10 : Math.round(value * 100) / 100;
+   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+ }
++
++function formatDecoderSummary(
++  mimeType: string | undefined,
++  decoderImplementation: string | undefined,
++  powerEfficient: boolean | undefined,
++): string | null {
++  const codec = mimeType?.replace(/^video\//i, "").trim().toUpperCase();
++  const impl = decoderImplementation?.trim();
++  const mode = powerEfficient === true ? "硬解" : powerEfficient === false ? "软解" : "";
++  const parts = [codec, impl || mode].filter(Boolean);
++  return parts.length > 0 ? parts.join(" · ") : null;
++}
 diff --git a/frontend/src/remote/remoteSessionEventBridge.ts b/frontend/src/remote/remoteSessionEventBridge.ts
 index 82146ee..d50f769 100644
 --- a/frontend/src/remote/remoteSessionEventBridge.ts
@@ -118,6 +879,146 @@ index 82146ee..d50f769 100644
        handlersByDevice.get(deviceId)?.onRemoteClipboard(text);
      },
      onRemoteCursorShape(shape) {
+diff --git a/frontend/src/remote/remoteShortcuts.ts b/frontend/src/remote/remoteShortcuts.ts
+index ed0ec7e..b0ffc93 100644
+--- a/frontend/src/remote/remoteShortcuts.ts
++++ b/frontend/src/remote/remoteShortcuts.ts
+@@ -4,14 +4,20 @@ export type RemoteShortcut =
+   | "windows-alt-tab"
+   | "windows-alt-f4"
+   | "windows-win-d"
++  | "windows-win-e"
++  | "windows-win-r"
+   | "windows-win-l"
++  | "windows-win-space"
+   | "windows-task-manager"
+   | "mac-cmd-tab"
+   | "mac-spotlight"
+   | "mac-force-quit"
+   | "mac-cmd-q"
+   | "mac-cmd-w"
+-  | "mac-hide-app";
++  | "mac-hide-app"
++  | "mac-lock-screen"
++  | "mac-screenshot"
++  | "mac-switch-ime";
+ 
+ type RemoteShortcutDefinition = {
+   id: RemoteShortcut;
+@@ -32,15 +38,18 @@ const KEY = {
+   altLeft: 57,
+   controlLeft: 113,
+   delete: 112,
++  digit4: 11,
+   escape: 111,
+   f4: 134,
+   metaLeft: 117,
+   q: 45,
++  r: 46,
+   shiftLeft: 59,
+   space: 62,
+   tab: 61,
+   w: 51,
+   d: 32,
++  e: 33,
+   h: 36,
+   l: 40,
+ } as const;
+@@ -53,7 +62,10 @@ const REMOTE_SHORTCUT_GROUPS: RemoteShortcutGroup[] = [
+       { id: "windows-alt-tab", label: "Alt Tab", keys: [KEY.altLeft, KEY.tab] },
+       { id: "windows-alt-f4", label: "Alt F4", keys: [KEY.altLeft, KEY.f4] },
+       { id: "windows-win-d", label: "Win D", keys: [KEY.metaLeft, KEY.d] },
++      { id: "windows-win-e", label: "Win E", keys: [KEY.metaLeft, KEY.e] },
++      { id: "windows-win-r", label: "Win R", keys: [KEY.metaLeft, KEY.r] },
+       { id: "windows-win-l", label: "Win L", keys: [KEY.metaLeft, KEY.l] },
++      { id: "windows-win-space", label: "Win Space", keys: [KEY.metaLeft, KEY.space] },
+       { id: "windows-task-manager", label: "Ctrl Shift Esc", keys: [KEY.controlLeft, KEY.shiftLeft, KEY.escape] },
+     ],
+   },
+@@ -66,6 +78,9 @@ const REMOTE_SHORTCUT_GROUPS: RemoteShortcutGroup[] = [
+       { id: "mac-cmd-q", label: "Cmd Q", keys: [KEY.metaLeft, KEY.q] },
+       { id: "mac-cmd-w", label: "Cmd W", keys: [KEY.metaLeft, KEY.w] },
+       { id: "mac-hide-app", label: "Cmd H", keys: [KEY.metaLeft, KEY.h] },
++      { id: "mac-lock-screen", label: "锁屏 (Ctrl Cmd Q)", keys: [KEY.controlLeft, KEY.metaLeft, KEY.q] },
++      { id: "mac-screenshot", label: "截屏 (Cmd Shift 4)", keys: [KEY.metaLeft, KEY.shiftLeft, KEY.digit4] },
++      { id: "mac-switch-ime", label: "输入法 (Ctrl Space)", keys: [KEY.controlLeft, KEY.space] },
+     ],
+   },
+   {
+diff --git a/frontend/tests/browserRemoteSession.negotiation.test.ts b/frontend/tests/browserRemoteSession.negotiation.test.ts
+index 9d873bb..9d6e515 100644
+--- a/frontend/tests/browserRemoteSession.negotiation.test.ts
++++ b/frontend/tests/browserRemoteSession.negotiation.test.ts
+@@ -282,6 +282,36 @@ describe("BrowserRemoteSession", () => {
+     }
+   });
+ 
++  it("prefers H265 with H264 and RTX fallback when HEVC preference is enabled and supported", async () => {
++    const { getBrowserVideoCodecPreferences, browserSupportsHevcWebRtc } = await import(
++      "../src/remote/browserRemote/negotiation.js"
++    );
++    vi.stubGlobal("RTCRtpReceiver", {
++      getCapabilities: () => ({
++        codecs: [
++          { mimeType: "video/VP8", clockRate: 90000 },
++          { mimeType: "video/H264", clockRate: 90000 },
++          { mimeType: "video/H265", clockRate: 90000 },
++          { mimeType: "video/rtx", clockRate: 90000 },
++        ],
++      }),
++    });
++    try {
++      expect(browserSupportsHevcWebRtc()).toBe(true);
++      expect(getBrowserVideoCodecPreferences("hevc").map((codec) => codec.mimeType)).toEqual([
++        "video/H265",
++        "video/H264",
++        "video/rtx",
++      ]);
++      expect(getBrowserVideoCodecPreferences("auto").map((codec) => codec.mimeType)).toEqual([
++        "video/H264",
++        "video/rtx",
++      ]);
++    } finally {
++      vi.unstubAllGlobals();
++    }
++  });
++
+   it("stops before creating WebRTC when signal control ack returns a nonzero ControlResult", async () => {
+     const soacCalls: RemoteSignalSoacRequest[] = [];
+     const api = {
+diff --git a/frontend/tests/remoteShortcuts.test.ts b/frontend/tests/remoteShortcuts.test.ts
+index c3751c1..6ce465f 100644
+--- a/frontend/tests/remoteShortcuts.test.ts
++++ b/frontend/tests/remoteShortcuts.test.ts
+@@ -32,4 +32,28 @@ describe("remote shortcut sender", () => {
+       { action: "keyboardRelease", value: 117 },
+     ]);
+   });
++
++  it("sends newly added Mac lock-screen and Windows explorer shortcuts", () => {
++    const sent: Array<{ action: string; value: string | number }> = [];
++    const sender = { sendKeyboardInput: (input: { action: string; value: string | number }) => sent.push(input) };
++
++    sendRemoteShortcut(sender, "mac-lock-screen");
++    expect(sent).toEqual([
++      { action: "keyboardPress", value: 113 },
++      { action: "keyboardPress", value: 117 },
++      { action: "keyboardPress", value: 45 },
++      { action: "keyboardRelease", value: 45 },
++      { action: "keyboardRelease", value: 117 },
++      { action: "keyboardRelease", value: 113 },
++    ]);
++
++    sent.length = 0;
++    sendRemoteShortcut(sender, "windows-win-e");
++    expect(sent).toEqual([
++      { action: "keyboardPress", value: 117 },
++      { action: "keyboardPress", value: 33 },
++      { action: "keyboardRelease", value: 33 },
++      { action: "keyboardRelease", value: 117 },
++    ]);
++  });
+ });
 diff --git a/frontend/tests/useRemoteInputController.test.tsx b/frontend/tests/useRemoteInputController.test.tsx
 index 62e24c4..d43d4a0 100644
 --- a/frontend/tests/useRemoteInputController.test.tsx
@@ -206,3 +1107,164 @@ index 62e24c4..d43d4a0 100644
  
      expect(session.sendMouseMove).toHaveBeenCalledOnce();
      expect(session.sendMouseButton).not.toHaveBeenCalled();
+diff --git a/shared/src/streamer/connectOptions.ts b/shared/src/streamer/connectOptions.ts
+index 06efb75..41b295f 100644
+--- a/shared/src/streamer/connectOptions.ts
++++ b/shared/src/streamer/connectOptions.ts
+@@ -2,11 +2,15 @@ import {
+   buildDefaultStreamerDecoderCap,
+   encodeBase64,
+   encodeStreamerConnectOptions,
++  encodeStreamerDecoderCap,
+ } from "./internal/connectOptionsCodec.js";
+ import {
+   STREAMER_APP_CLIENT_VERSION,
+   STREAMER_CAPTURE_TYPES,
+   STREAMER_CHOOSE_RESOLUTION_TYPES,
++  STREAMER_CHROMA_FORMATS,
++  STREAMER_DECODER_CHROMA_FORMATS,
++  STREAMER_DECODER_CODEC_TYPES,
+   STREAMER_DEFAULT_BROWSER_LOCAL_RESOLUTION,
+   STREAMER_DEFAULT_BROWSER_TYPE_VALUE,
+   STREAMER_DEFAULT_BROWSER_VIRTUAL_DISPLAY_MODE,
+@@ -21,17 +25,65 @@ import {
+   type StreamerVirtualDisplayModeInput,
+ } from "./connectOptionsModel.js";
+ 
++export {
++  STREAMER_CHOOSE_RESOLUTION_TYPES,
++  STREAMER_CHROMA_FORMATS,
++  STREAMER_DECODER_CHROMA_FORMATS,
++  STREAMER_DECODER_CODEC_TYPES,
++  STREAMER_FPS_VALUES,
++  STREAMER_VIDEO_QUALITY_VALUES,
++};
++
+ export interface BuildDefaultStreamerConnectOptionsBase64Input {
+   deviceId: string;
+   clientType?: number;
+   controlConnectType?: number;
+   fps?: number;
++  fpsCount?: number;
+   videoQuality?: number;
++  autoFrameQuality?: number;
+   cursorCapture?: boolean;
++  chooseResolutionType?: number;
+   localResolution?: StreamerScreenResolutionInput | null;
++  chooseResolution?: StreamerScreenResolutionInput | null;
++  chromaFormat?: number;
++  maxCustomBitrate?: number;
++  enableHdr?: boolean;
++  decoderCapList?: readonly Uint8Array[];
+   virtualDisplayModes?: readonly StreamerVirtualDisplayModeInput[];
+ }
+ 
++export function buildStreamerBrowserDecoderCapList(input: {
++  fps?: number;
++  chromaFormat?: number;
++  includeHevc?: boolean;
++} = {}): Uint8Array[] {
++  const fps = input.fps ?? 60;
++  const chromaFormat = input.chromaFormat ?? STREAMER_DECODER_CHROMA_FORMATS.ChromaFormat_420;
++  const caps: Uint8Array[] = [];
++  if (input.includeHevc) {
++    caps.push(
++      encodeStreamerDecoderCap({
++        fps,
++        codecType: STREAMER_DECODER_CODEC_TYPES.CodecType_H265,
++        width: 3840,
++        height: 2160,
++        chromaFormat,
++      }),
++    );
++  }
++  caps.push(
++    encodeStreamerDecoderCap({
++      fps,
++      codecType: STREAMER_DECODER_CODEC_TYPES.CodecType_H264,
++      width: 3840,
++      height: 2160,
++      chromaFormat,
++    }),
++  );
++  return caps;
++}
++
+ export function buildDefaultStreamerConnectOptionsBase64(input: BuildDefaultStreamerConnectOptionsBase64Input): string {
+   return encodeBase64(
+     encodeStreamerConnectOptions({
+@@ -42,10 +94,16 @@ export function buildDefaultStreamerConnectOptionsBase64(input: BuildDefaultStre
+         fps: input.fps ?? STREAMER_FPS_VALUES.FPS_60,
+         videoQuality: input.videoQuality ?? STREAMER_VIDEO_QUALITY_VALUES.VideoQuality_HD,
+         cursorCapture: input.cursorCapture ?? true,
+-        chooseResolutionType: STREAMER_CHOOSE_RESOLUTION_TYPES.ChooseType_DEFAULT,
++        chooseResolutionType: input.chooseResolutionType ?? STREAMER_CHOOSE_RESOLUTION_TYPES.ChooseType_DEFAULT,
+         localResolution: input.localResolution ?? STREAMER_DEFAULT_BROWSER_LOCAL_RESOLUTION,
++        chooseResolution: input.chooseResolution,
++        chromaFormat: input.chromaFormat,
++        maxCustomBitrate: input.maxCustomBitrate,
++        enableHdr: input.enableHdr,
++        autoFrameQuality: input.autoFrameQuality,
++        fpsCount: input.fpsCount,
+       },
+-      decoderCapList: [buildDefaultStreamerDecoderCap()],
++      decoderCapList: input.decoderCapList ?? [buildDefaultStreamerDecoderCap()],
+       virtualDisplayModes: input.virtualDisplayModes ?? [STREAMER_DEFAULT_BROWSER_VIRTUAL_DISPLAY_MODE],
+       clientType: input.clientType ?? STREAMER_CLIENT_TYPES.Client_ANDROID,
+       controlConnectType: input.controlConnectType ?? STREAMER_CONTROL_CONNECT_TYPES.ControlConnectType_Normal,
+diff --git a/shared/src/streamer/controlConfig.ts b/shared/src/streamer/controlConfig.ts
+index c142009..3cec2b4 100644
+--- a/shared/src/streamer/controlConfig.ts
++++ b/shared/src/streamer/controlConfig.ts
+@@ -1,4 +1,5 @@
+-import { buildStreamerBrowserDeviceCapability } from "./internal/controlConfigSchema.js";
++import { STREAMER_CHROMA_FORMATS, STREAMER_VIDEO_CODECS } from "./internal/connectOptionsSchema.js";
++import { buildStreamerBrowserDeviceCapability, type StreamerDeviceCapability } from "./internal/controlConfigSchema.js";
+ import { asRecord } from "./internal/unknown.js";
+ 
+ export interface BuildStreamerControlStreamerDataJsonInput {
+@@ -7,6 +8,44 @@ export interface BuildStreamerControlStreamerDataJsonInput {
+   deviceCapability?: unknown;
+ }
+ 
++export interface BuildStreamerBrowserDeviceCapabilityOptions {
++  fps?: number;
++  chromaSampling?: number;
++  includeHevc?: boolean;
++  enableHdr?: boolean;
++}
++
++export function buildStreamerBrowserDeviceCapabilityWithOptions(
++  options: BuildStreamerBrowserDeviceCapabilityOptions = {},
++): StreamerDeviceCapability {
++  const fps = options.fps ?? 60;
++  const chromaSampling = options.chromaSampling ?? STREAMER_CHROMA_FORMATS.ChromaFormat_420;
++  const codecs: StreamerDeviceCapability["video_codec_capability"] = [];
++  if (options.includeHevc) {
++    codecs.push({
++      video_codec: STREAMER_VIDEO_CODECS.H265,
++      width: 3840,
++      height: 2160,
++      chroma_sampling: chromaSampling,
++      bit_depth: 8,
++      codec_impl: -1,
++    });
++  }
++  codecs.push({
++    video_codec: STREAMER_VIDEO_CODECS.H264,
++    width: 3840,
++    height: 2160,
++    chroma_sampling: chromaSampling,
++    bit_depth: 8,
++    codec_impl: -1,
++  });
++  return {
++    display_info: [{ id: 0, fps, type: 0, hdr: options.enableHdr ? 1 : -1 }],
++    video_codec_capability: codecs,
++    ice_id: "",
++  };
++}
++
+ export function buildStreamerControlStreamerDataJson(input: BuildStreamerControlStreamerDataJsonInput): string {
+   const capability = input.deviceCapability ?? buildStreamerBrowserDeviceCapability();
+   const record = asRecord(capability);
