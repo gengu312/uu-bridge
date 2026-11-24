@@ -168,7 +168,20 @@ describe("localAgentBridge", () => {
     const es = FakeEventSource.instances[0];
     expect(es).toBeDefined();
     es.emit("hello", { protocol: "uubridge-agent/1", tab_id: "tab_1" });
-    await vi.waitFor(() => expect(document.getElementById("uubridge-agent-bar")?.shadowRoot?.textContent).toContain("Agent 已授权控制"));
+    await vi.waitFor(() => expect(document.getElementById("uubridge-agent-bar")?.shadowRoot?.textContent).toContain("Agent 已授权"));
+
+    // Verify automatic docking into .control-side-panel and fallback to floating when sidebar closes
+    const sidebar = document.createElement("aside");
+    sidebar.className = "control-side-panel";
+    document.body.appendChild(sidebar);
+    await vi.waitFor(() => expect(document.getElementById("uubridge-agent-bar")?.parentElement).toBe(sidebar));
+    expect(document.getElementById("uubridge-agent-bar")?.dataset.docked).toBe("sidebar");
+    sidebar.remove();
+    await vi.waitFor(() => expect(document.getElementById("uubridge-agent-bar")?.parentElement).toBe(document.body));
+    expect(document.getElementById("uubridge-agent-bar")?.dataset.docked).toBe("floating");
+    // Re-expand after auto-collapse so action buttons are accessible for assertions below
+    const expandBtn = document.getElementById("uubridge-agent-bar")?.shadowRoot?.getElementById("expand") as HTMLButtonElement | null;
+    expandBtn?.click();
 
     // Sequence: click -> scroll down (macOS desktop flips vertical delta negative) -> type_text -> hotkey
     es.emit("command", {

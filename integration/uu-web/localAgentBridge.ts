@@ -88,11 +88,30 @@ const THEME_STYLE_ID = "uubridge-theme-override";
 
 type ThemeMode = "system" | "light" | "dark";
 
+const PAGE_LAYOUT_POLISH_CSS = `
+/* 提高画面利用率：单设备连接时隐藏与顶栏重复的页签条，多设备时自动保留；收紧顶栏与侧栏宽度。 */
+.control-shell > .remote-connection-tabs:has(.remote-connection-tab:only-child) {
+  display: none !important;
+}
+.control-shell > .control-topbar {
+  min-height: 42px;
+  padding: 0 10px;
+}
+.control-side-panel {
+  flex: 0 0 272px;
+}
+.control-side-panel .tabs-panel {
+  padding: 12px;
+}
+`;
+
 const PAGE_LIGHT_THEME_CSS = `
+${PAGE_LAYOUT_POLISH_CSS}
 :root {
   color-scheme: light;
 }
 .control-shell {
+  --stage: #e9edf3;
   --dark-bg: #f4f6f9;
   --dark-bg-pure: #e9edf3;
   --dark-panel: #ffffff;
@@ -114,8 +133,25 @@ const PAGE_LIGHT_THEME_CSS = `
   --dark-idle-bg: #e2e8f0;
   --dark-danger: #dc2626;
 }
+.control-shell > .remote-connection-tabs {
+  background: #ffffff !important;
+  border-color: #dde3ec !important;
+}
+.control-shell > .remote-connection-tabs .remote-connection-tabs-label {
+  color: #64748b !important;
+}
+.control-shell > .remote-connection-tabs .remote-connection-tab {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+.control-shell > .remote-connection-tabs .remote-connection-tab.is-active {
+  border-color: #2563eb !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
 .control-topbar--overlay {
-  background: rgba(255, 255, 255, 0.9) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
 }
 .control-command-bar {
   color: var(--dark-text) !important;
@@ -134,6 +170,11 @@ const PAGE_LIGHT_THEME_CSS = `
   border-color: #cbd5e1 !important;
   background: #e2e8f0 !important;
   color: #0f172a !important;
+}
+.control-command-bar .remote-audio-button.is-attention:not(:disabled) {
+  border-color: #f59e0b !important;
+  background: #fef3c7 !important;
+  color: #b45309 !important;
 }
 .control-command-bar .primary-action-button,
 .control-command-bar .control-mode-switch button.is-active {
@@ -188,12 +229,26 @@ const PAGE_LIGHT_THEME_CSS = `
   border-color: #fcd34d !important;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12) !important;
 }
+.control-shell .remote-stage,
+.control-shell .remote-video-grid,
+.control-shell .remote-video-tile,
+.control-shell .remote-video {
+  background: #e9edf3 !important;
+}
 .control-shell .remote-stage {
   border-color: #cbd5e1;
+}
+.control-shell .stage-center,
+.control-shell .stage-center strong {
+  color: #1e293b !important;
+}
+.control-shell .stage-center span {
+  color: #64748b !important;
 }
 `;
 
 const PAGE_DARK_THEME_CSS = `
+${PAGE_LAYOUT_POLISH_CSS}
 :root {
   color-scheme: dark;
   --bg: #0f1115;
@@ -314,6 +369,8 @@ export class LocalAgentBridgeRuntime {
   private uiHost: HTMLDivElement | null = null;
   private uiRoot: ShadowRoot | null = null;
   private uiCollapsed = false;
+  private dockedInSidebar = false;
+  private domObserver: MutationObserver | null = null;
   private sseConnected = false;
   private themeMode: ThemeMode = "system";
   private colorSchemeMedia: MediaQueryList | null = null;
@@ -332,6 +389,7 @@ export class LocalAgentBridgeRuntime {
 
     this.initTheme();
     this.mountControlBar();
+    this.observeSidebarMount();
     this.installHumanTakeoverListener();
     this.connectEvents();
     this.syncTimer = window.setInterval(() => {
@@ -344,6 +402,8 @@ export class LocalAgentBridgeRuntime {
 
   stop(): void {
     this.cleanup();
+    this.domObserver?.disconnect();
+    this.domObserver = null;
     if (this.colorSchemeMedia && this.onColorSchemeChange) {
       this.colorSchemeMedia.removeEventListener?.("change", this.onColorSchemeChange);
     }
@@ -1366,14 +1426,70 @@ export class LocalAgentBridgeRuntime {
   private mountControlBar(): void {
     const host = document.createElement("div");
     host.id = "uubridge-agent-bar";
-    host.style.position = "fixed";
-    host.style.right = "16px";
-    host.style.bottom = "16px";
-    host.style.zIndex = "2147483000";
-    document.body.appendChild(host);
     this.uiHost = host;
     this.uiRoot = host.attachShadow({ mode: "open" });
+    this.syncMountPoint();
     this.renderBar();
+  }
+
+  private observeSidebarMount(): void {
+    if (typeof MutationObserver === "undefined") return;
+    this.domObserver = new MutationObserver(() => {
+      const changed = this.syncMountPoint();
+      if (changed) this.renderBar();
+    });
+    this.domObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  private syncMountPoint(): boolean {
+    const host = this.uiHost;
+    if (!host) return false;
+    const sidePanel = document.querySelector<HTMLElement>(".control-side-panel");
+    const shouldDock = Boolean(sidePanel && sidePanel.isConnected);
+    const prevDocked = this.dockedInSidebar;
+
+    if (shouldDock && sidePanel) {
+      this.dockedInSidebar = true;
+      host.dataset.docked = "sidebar";
+      host.style.position = "static";
+      host.style.flex = "0 0 auto";
+      host.style.width = "100%";
+      host.style.left = "auto";
+      host.style.top = "auto";
+      host.style.right = "auto";
+      host.style.bottom = "auto";
+      host.style.zIndex = "auto";
+      if (host.parentElement !== sidePanel) {
+        sidePanel.appendChild(host);
+      }
+      return prevDocked !== true;
+    }
+
+    this.dockedInSidebar = false;
+    host.dataset.docked = "floating";
+    host.style.position = "fixed";
+    host.style.flex = "";
+    host.style.width = "auto";
+    host.style.zIndex = "2147483000";
+    if (this.barPosition) {
+      host.style.left = `${this.barPosition.left}px`;
+      host.style.top = `${this.barPosition.top}px`;
+      host.style.right = "auto";
+      host.style.bottom = "auto";
+    } else {
+      host.style.left = "auto";
+      host.style.top = "auto";
+      host.style.right = "14px";
+      host.style.bottom = "14px";
+    }
+    if (host.parentElement !== document.body) {
+      document.body.appendChild(host);
+    }
+    // When side panel was just closed, auto-collapse to compact corner pill so it won't block video.
+    if (prevDocked && !this.dockedInSidebar) {
+      this.uiCollapsed = true;
+    }
+    return prevDocked !== false;
   }
 
   private bindThemeButtons(root: ShadowRoot): void {
@@ -1432,31 +1548,33 @@ export class LocalAgentBridgeRuntime {
   }
 
   private renderBar(): void {
+    this.syncMountPoint();
     const root = this.uiRoot;
     if (!root) return;
     const policy = this.selectDisplayedPolicy();
     const isDark = this.getResolvedTheme() === "dark";
+    const docked = this.dockedInSidebar;
 
     const palette = isDark
       ? {
-          bg: "rgba(20, 24, 33, 0.92)",
-          border: "rgba(148, 163, 184, 0.26)",
+          bg: docked ? "#131316" : "rgba(20, 24, 33, 0.92)",
+          border: docked ? "rgba(255, 255, 255, 0.09)" : "rgba(148, 163, 184, 0.26)",
           text: "#f1f5f9",
           soft: "#cbd5e1",
           muted: "#94a3b8",
-          segBg: "rgba(15, 23, 42, 0.72)",
-          segActiveBg: "rgba(51, 65, 85, 0.95)",
-          btnBg: "rgba(30, 41, 59, 0.92)",
-          btnHover: "rgba(51, 65, 85, 0.98)",
-          divider: "rgba(148, 163, 184, 0.16)",
-          shadow: "0 12px 32px rgba(0, 0, 0, 0.44)",
-          dangerBg: "rgba(127, 29, 29, 0.65)",
-          dangerBorder: "rgba(248, 113, 113, 0.42)",
+          segBg: "rgba(255, 255, 255, 0.06)",
+          segActiveBg: "rgba(255, 255, 255, 0.16)",
+          btnBg: "rgba(255, 255, 255, 0.06)",
+          btnHover: "rgba(255, 255, 255, 0.12)",
+          divider: "rgba(255, 255, 255, 0.08)",
+          shadow: docked ? "none" : "0 12px 32px rgba(0, 0, 0, 0.44)",
+          dangerBg: "rgba(127, 29, 29, 0.45)",
+          dangerBorder: "rgba(248, 113, 113, 0.35)",
           dangerText: "#fecaca",
         }
       : {
-          bg: "rgba(255, 255, 255, 0.94)",
-          border: "rgba(15, 23, 42, 0.12)",
+          bg: docked ? "#ffffff" : "rgba(255, 255, 255, 0.94)",
+          border: docked ? "#dde3ec" : "rgba(15, 23, 42, 0.12)",
           text: "#0f172a",
           soft: "#334155",
           muted: "#64748b",
@@ -1464,8 +1582,8 @@ export class LocalAgentBridgeRuntime {
           segActiveBg: "#ffffff",
           btnBg: "#f8fafc",
           btnHover: "#eef2f6",
-          divider: "rgba(15, 23, 42, 0.08)",
-          shadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
+          divider: "#e2e8f0",
+          shadow: docked ? "none" : "0 10px 30px rgba(15, 23, 42, 0.12)",
           dangerBg: "#fef2f2",
           dangerBorder: "#fecaca",
           dangerText: "#b91c1c",
@@ -1473,12 +1591,12 @@ export class LocalAgentBridgeRuntime {
 
     const sharedStyles = `
       * { box-sizing: border-box; }
-      .theme-seg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 999px;
+      .theme-seg { display: inline-flex; align-items: center; gap: 1px; padding: 2px; border-radius: 999px;
         background: ${palette.segBg}; border: 1px solid ${palette.border}; }
-      .tbtn { border: none; background: transparent; color: ${palette.muted}; font: 500 11px/1.2 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-        padding: 3px 7px; border-radius: 999px; cursor: pointer; }
+      .tbtn { border: none; background: transparent; color: ${palette.muted}; font: 500 10.5px/1.2 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+        padding: 3px 6px; border-radius: 999px; cursor: pointer; }
       .tbtn:hover { color: ${palette.text}; }
-      .tbtn.active { background: ${palette.segActiveBg}; color: ${palette.text}; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+      .tbtn.active { background: ${palette.segActiveBg}; color: ${palette.text}; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
     `;
 
     if (!policy) {
@@ -1486,14 +1604,13 @@ export class LocalAgentBridgeRuntime {
         <style>
           ${sharedStyles}
           .pill { font: 12px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; color: ${palette.soft};
-            background: ${palette.bg}; border: 1px solid ${palette.border};
-            border-radius: 999px; padding: 6px 8px 6px 12px; display: inline-flex; align-items: center; gap: 10px;
-            backdrop-filter: blur(12px); box-shadow: ${palette.shadow}; user-select: none; }
-          .dot { width: 8px; height: 8px; border-radius: 50%; background: ${this.sseConnected ? "#10b981" : "#94a3b8"}; flex-shrink: 0; }
+            background: ${palette.bg}; ${docked ? `border-top: 1px solid ${palette.border}; padding: 10px 12px; width: 100%; justify-content: space-between;` : `border: 1px solid ${palette.border}; border-radius: 999px; padding: 6px 8px 6px 12px; backdrop-filter: blur(12px); box-shadow: ${palette.shadow};`}
+            display: inline-flex; align-items: center; gap: 8px; user-select: none; }
+          .left { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+          .dot { width: 7px; height: 7px; border-radius: 50%; background: ${this.sseConnected ? "#10b981" : "#94a3b8"}; flex-shrink: 0; }
         </style>
         <div class="pill" role="status" aria-live="polite">
-          <span class="dot"></span>
-          <span>${this.sseConnected ? "Agent 就绪 · 连接设备后可授权控制" : "Agent 桥接重连中…"}</span>
+          <span class="left"><span class="dot"></span><span>${this.sseConnected ? (docked ? "Agent 桥接就绪" : "Agent 就绪 · 连接设备后可授权控制") : "Agent 桥接重连中…"}</span></span>
           ${this.themeSwitcherHtml()}
         </div>
       `;
@@ -1510,42 +1627,44 @@ export class LocalAgentBridgeRuntime {
           ? "#10b981"
           : "#3b82f6";
     const statusLabel = policy.human_paused
-      ? "人类已暂停接管"
+      ? "人类已暂停"
       : policy.busy
         ? "Agent 执行中"
         : policy.control_allowed
-          ? "Agent 已授权控制"
-          : "仅观察（默认锁定）";
+          ? "Agent 已授权"
+          : "Agent 仅观察";
     const guideText = policy.human_paused
-      ? "已暂停 Agent，你可以自由操作画面；点击「恢复 Agent」继续协同。"
+      ? "已暂停 Agent，你可以自由操作画面。"
       : policy.control_allowed
-        ? "Agent 可向远端发送键鼠与文本；随时点击「暂停接管」收回控制。"
-        : "当前仅允许查看截图，点击下方「允许 Agent 控制」后才会放行输入。";
+        ? "Agent 可操控远端；随时点「暂停」接管。"
+        : "默认仅截屏观察，点下方授权才放行输入。";
 
-    if (this.uiCollapsed) {
+    if (this.uiCollapsed && !docked) {
       root.innerHTML = `
         <style>
           ${sharedStyles}
           .pill { font: 12px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; color: ${palette.text};
             background: ${palette.bg}; border: 1px solid ${palette.border}; border-radius: 999px;
-            padding: 5px 8px 5px 11px; display: inline-flex; align-items: center; gap: 8px;
+            padding: 4px 7px 4px 10px; display: inline-flex; align-items: center; gap: 7px;
             backdrop-filter: blur(12px); box-shadow: ${palette.shadow}; user-select: none; }
-          .expand { border: none; background: transparent; color: inherit; font: 600 12px/1.4 inherit;
-            display: inline-flex; align-items: center; gap: 7px; cursor: pointer; padding: 2px 4px; }
-          .dot { width: 8px; height: 8px; border-radius: 50%; background: ${statusColor}; }
+          .expand { border: none; background: transparent; color: inherit; font: 600 11.5px/1.3 inherit;
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 3px; }
+          .dot { width: 7px; height: 7px; border-radius: 50%; background: ${statusColor}; }
           .quick { border: 1px solid ${palette.border}; background: ${palette.btnBg}; color: ${palette.text};
-            font: 500 11px/1.2 inherit; padding: 4px 8px; border-radius: 999px; cursor: pointer; }
+            font: 500 11px/1.2 inherit; padding: 3px 8px; border-radius: 999px; cursor: pointer; }
           .quick:hover { background: ${palette.btnHover}; }
         </style>
         <div class="pill">
-          <button id="expand" class="expand" type="button" title="展开 Agent 协同控制条">
+          <button id="expand" class="expand" type="button" title="展开 Agent 控制条">
             <span class="dot"></span><span id="collapsed-label"></span>
           </button>
           ${policy.authorized ? `<button id="quick-pause" class="quick" type="button">${policy.human_paused ? "恢复" : "暂停"}</button>` : ""}
+          ${this.themeSwitcherHtml()}
         </div>
       `;
       const lbl = root.getElementById("collapsed-label");
       if (lbl) lbl.textContent = statusLabel;
+      this.bindThemeButtons(root);
       root.getElementById("expand")?.addEventListener("click", () => {
         this.uiCollapsed = false;
         this.renderBar();
@@ -1558,29 +1677,34 @@ export class LocalAgentBridgeRuntime {
     }
 
     const lastActionText = policy.last_action
-      ? `最近操作：${new Date(policy.last_action.at).toLocaleTimeString([], { hour12: false })} · ${policy.last_action.summary}`
+      ? `最近：${new Date(policy.last_action.at).toLocaleTimeString([], { hour12: false })} · ${policy.last_action.summary}`
       : "尚未收到 Agent 输入指令";
 
     root.innerHTML = `
       <style>
         ${sharedStyles}
-        .card { font: 12px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; color: ${palette.text};
-          background: ${palette.bg}; border: 1px solid ${palette.border}; border-radius: 14px;
-          padding: 11px 13px; width: 326px; backdrop-filter: blur(14px);
-          box-shadow: ${palette.shadow}; user-select: none; }
-        .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: grab; }
-        .header:active { cursor: grabbing; }
-        .title-wrap { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .title { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 12.5px; color: ${palette.text}; }
-        .device { font-size: 11px; color: ${palette.muted}; padding-left: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .header-right { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; background: ${statusColor}; flex-shrink: 0; }
-        .icon-btn { background: transparent; border: none; color: ${palette.muted}; cursor: pointer; padding: 3px 6px; border-radius: 6px; font-size: 12px; }
+        .card { font: 12px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; color: ${palette.text};
+          background: ${palette.bg};
+          ${
+            docked
+              ? `border-top: 1px solid ${palette.border}; padding: 10px 12px 11px; width: 100%;`
+              : `border: 1px solid ${palette.border}; border-radius: 14px; padding: 11px 13px; width: 312px; backdrop-filter: blur(14px); box-shadow: ${palette.shadow};`
+          }
+          user-select: none; }
+        .header { display: flex; align-items: center; justify-content: space-between; gap: 6px; ${docked ? "" : "cursor: grab;"} }
+        ${docked ? "" : ".header:active { cursor: grabbing; }"}
+        .title-wrap { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+        .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: ${palette.text}; }
+        .device { font-size: 10.5px; color: ${palette.muted}; padding-left: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .header-right { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: ${statusColor}; flex-shrink: 0; }
+        .icon-btn { background: transparent; border: none; color: ${palette.muted}; cursor: pointer; padding: 2px 5px; border-radius: 6px; font-size: 12px; }
         .icon-btn:hover { background: ${palette.btnHover}; color: ${palette.text}; }
-        .guide { margin: 8px 0 0; font-size: 11.5px; color: ${palette.soft}; line-height: 1.5; }
-        .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-        .btn { flex: 1; min-width: 82px; padding: 7px 10px; border-radius: 9px; border: 1px solid ${palette.border};
-          background: ${palette.btnBg}; color: ${palette.text}; font-size: 12px; font-weight: 550; cursor: pointer; transition: background .12s; }
+        .guide { margin: 6px 0 0; font-size: 11px; color: ${palette.muted}; line-height: 1.45; }
+        .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin-top: 8px; }
+        .btn { padding: 6px 6px; border-radius: 8px; border: 1px solid ${palette.border};
+          background: ${palette.btnBg}; color: ${palette.text}; font-size: 11.5px; font-weight: 550; cursor: pointer;
+          transition: background .12s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .btn:hover:not(:disabled) { background: ${palette.btnHover}; }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .btn.primary { background: #15803d; border-color: #16a34a; color: #ffffff; }
@@ -1588,36 +1712,36 @@ export class LocalAgentBridgeRuntime {
         .btn.warn { background: #d97706; border-color: #f59e0b; color: #ffffff; }
         .btn.warn:hover:not(:disabled) { background: #b45309; }
         .btn.danger { background: ${palette.dangerBg}; border-color: ${palette.dangerBorder}; color: ${palette.dangerText}; }
-        .meta { margin-top: 9px; padding-top: 8px; border-top: 1px solid ${palette.divider};
-          display: flex; flex-direction: column; gap: 6px; color: ${palette.muted}; font-size: 11px; }
+        .meta { margin-top: 8px; padding-top: 7px; border-top: 1px solid ${palette.divider};
+          display: flex; flex-direction: column; gap: 5px; color: ${palette.muted}; font-size: 11px; }
         label.opt { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: ${palette.soft}; }
         .log { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: ${palette.muted}; }
       </style>
       <div class="card" role="region" aria-label="Agent 协同控制条">
-        <div id="drag-handle" class="header" title="按住此处可拖动控制条位置">
+        <div id="drag-handle" class="header" title="${docked ? "Agent 协同控制" : "按住此处可拖动控制条位置"}">
           <div class="title-wrap">
             <span class="title"><span class="dot"></span><span id="status-text"></span></span>
-            <span id="device-name" class="device"></span>
+            ${docked ? "" : '<span id="device-name" class="device"></span>'}
           </div>
           <div class="header-right">
             ${this.themeSwitcherHtml()}
-            <button id="collapse" class="icon-btn" type="button" title="收起为胶囊">▾</button>
+            ${docked ? "" : '<button id="collapse" class="icon-btn" type="button" title="收起为胶囊">▾</button>'}
           </div>
         </div>
         <p id="guide-text" class="guide"></p>
         <div class="actions">
           <button id="toggle-auth" class="btn ${policy.authorized ? "" : "primary"}" type="button">
-            ${policy.authorized ? "撤销授权" : "允许 Agent 控制"}
+            ${policy.authorized ? "撤销授权" : "允许控制"}
           </button>
           <button id="toggle-pause" class="btn ${policy.human_paused ? "primary" : "warn"}" type="button" ${policy.authorized ? "" : "disabled"}>
-            ${policy.human_paused ? "恢复 Agent" : "暂停接管"}
+            ${policy.human_paused ? "恢复控制" : "暂停接管"}
           </button>
           <button id="release" class="btn danger" type="button">释放按键</button>
         </div>
         <div class="meta">
           <label class="opt">
             <input id="auto-pause" type="checkbox" ${policy.auto_pause_on_human_input ? "checked" : ""} />
-            <span>我操作画面时自动暂停（已忽略切窗快捷键）</span>
+            <span>操作画面时自动暂停</span>
           </label>
           <div id="last-action" class="log"></div>
         </div>
@@ -1633,15 +1757,10 @@ export class LocalAgentBridgeRuntime {
     const logEl = root.getElementById("last-action");
     if (logEl) logEl.textContent = lastActionText;
 
-    if (this.barPosition && this.uiHost) {
-      this.uiHost.style.left = `${this.barPosition.left}px`;
-      this.uiHost.style.top = `${this.barPosition.top}px`;
-      this.uiHost.style.right = "auto";
-      this.uiHost.style.bottom = "auto";
-    }
-
     this.bindThemeButtons(root);
-    this.bindDragHandle(root.getElementById("drag-handle"));
+    if (!docked) {
+      this.bindDragHandle(root.getElementById("drag-handle"));
+    }
 
     root.getElementById("collapse")?.addEventListener("click", () => {
       this.uiCollapsed = true;
