@@ -1,0 +1,208 @@
+diff --git a/frontend/src/controllers/useRemoteInputController.ts b/frontend/src/controllers/useRemoteInputController.ts
+index aafd2da..c5487ec 100644
+--- a/frontend/src/controllers/useRemoteInputController.ts
++++ b/frontend/src/controllers/useRemoteInputController.ts
+@@ -156,6 +156,7 @@ export function useRemoteInputController({
+ 
+   useEffect(() => {
+     const releaseHeldInputs = () => {
++      activePointerIdRef.current = null;
+       clearClipboardShortcutState();
+       browserSessionRef.current?.releaseAllInputs();
+     };
+@@ -228,11 +229,19 @@ export function useRemoteInputController({
+     event.preventDefault();
+     event.currentTarget.focus();
+     activePointerIdRef.current = event.pointerId;
+-    event.currentTarget.setPointerCapture?.(event.pointerId);
++    try {
++      event.currentTarget.setPointerCapture?.(event.pointerId);
++    } catch {
++      // 合成事件可能没有浏览器活动指针，捕获失败仍需发送远端输入。
++    }
+     if (!flushPointerPosition(pointerPositionFromEvent(event))) {
+       activePointerIdRef.current = null;
+-      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+-        event.currentTarget.releasePointerCapture?.(event.pointerId);
++      try {
++        if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
++          event.currentTarget.releasePointerCapture?.(event.pointerId);
++        }
++      } catch {
++        // 浏览器可能已自动释放指针捕获。
+       }
+       return;
+     }
+@@ -261,11 +270,15 @@ export function useRemoteInputController({
+   function handleRemoteStagePointerUp(event: PointerEvent<HTMLDivElement>): void {
+     const session = browserSessionRef.current;
+     if (!inputControlActive || !session) return;
+-    if (activePointerIdRef.current !== null && activePointerIdRef.current !== event.pointerId) return;
++    if (activePointerIdRef.current !== event.pointerId) return;
+     event.preventDefault();
+     activePointerIdRef.current = null;
+-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+-      event.currentTarget.releasePointerCapture?.(event.pointerId);
++    try {
++      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
++        event.currentTarget.releasePointerCapture?.(event.pointerId);
++      }
++    } catch {
++      // 捕获可能已失效，仍需释放远端按键。
+     }
+     flushPointerPosition(pointerPositionFromEvent(event));
+     try {
+diff --git a/frontend/src/main.tsx b/frontend/src/main.tsx
+index aa68bc1..62755df 100644
+--- a/frontend/src/main.tsx
++++ b/frontend/src/main.tsx
+@@ -2,6 +2,7 @@ import { StrictMode } from "react";
+ import { createRoot, hydrateRoot } from "react-dom/client";
+ 
+ import App from "./App.js";
++import { startLocalAgentBridge } from "./localAgentBridge.js";
+ 
+ const rootElement = document.getElementById("root") as HTMLElement;
+ const hasPrerenderedLanding = window.location.pathname === "/" && rootElement.dataset.prerendered === "landing";
+@@ -17,3 +18,5 @@ if (hasPrerenderedLanding) {
+   rootElement.replaceChildren();
+   createRoot(rootElement).render(app);
+ }
++
++void startLocalAgentBridge();
+diff --git a/frontend/src/remote/browserRemoteSession.ts b/frontend/src/remote/browserRemoteSession.ts
+index 8180ce5..a7e8934 100644
+--- a/frontend/src/remote/browserRemoteSession.ts
++++ b/frontend/src/remote/browserRemoteSession.ts
+@@ -158,6 +158,10 @@ export class BrowserRemoteSession {
+     return Math.floor(this.now() / 1000);
+   }
+ 
++  getTargetPlatform(): number | undefined {
++    return this.targetPlatform;
++  }
++
+   getState(): BrowserRemoteSessionState {
+     return {
+       ...this.state,
+diff --git a/frontend/src/remote/remoteSessionEventBridge.ts b/frontend/src/remote/remoteSessionEventBridge.ts
+index 82146ee..d50f769 100644
+--- a/frontend/src/remote/remoteSessionEventBridge.ts
++++ b/frontend/src/remote/remoteSessionEventBridge.ts
+@@ -34,6 +34,14 @@ interface PendingEvents {
+ 
+ const handlersByDevice = new Map<string, RemoteSessionEventHandlers>();
+ const pendingByDevice = new Map<string, PendingEvents>();
++const clipboardObservers = new Set<(deviceId: string, text: string) => void>();
++
++export function addRemoteClipboardObserver(observer: (deviceId: string, text: string) => void): () => void {
++  clipboardObservers.add(observer);
++  return () => {
++    clipboardObservers.delete(observer);
++  };
++}
+ 
+ function pendingFor(deviceId: string): PendingEvents {
+   let pending = pendingByDevice.get(deviceId);
+@@ -90,6 +98,13 @@ export function makeSessionEventBridge(deviceId: string): RemoteSessionEventHand
+        * 剪贴板消息没有"补发"的语义：页面不在场时收到的剪贴板内容，
+        * 过一会儿再凭空塞给用户是错的。丢掉即可。
+        */
++      for (const observer of clipboardObservers) {
++        try {
++          observer(deviceId, text);
++        } catch {
++          // 忽略观察者异常，避免影响主链路。
++        }
++      }
+       handlersByDevice.get(deviceId)?.onRemoteClipboard(text);
+     },
+     onRemoteCursorShape(shape) {
+diff --git a/frontend/tests/useRemoteInputController.test.tsx b/frontend/tests/useRemoteInputController.test.tsx
+index 62e24c4..d43d4a0 100644
+--- a/frontend/tests/useRemoteInputController.test.tsx
++++ b/frontend/tests/useRemoteInputController.test.tsx
+@@ -99,6 +99,65 @@ describe("useRemoteInputController", () => {
+     expect(calls).toHaveLength(3);
+   });
+ 
++  it.each([
++    ["setPointerCapture", "pointerup"],
++    ["releasePointerCapture", "pointerup"],
++    ["setPointerCapture", "pointercancel"],
++    ["setPointerCapture", "blur"],
++  ] as const)("keeps inputs balanced when %s throws NotFoundError before %s", async (failingMethod, endEvent) => {
++    const onError = vi.fn();
++    const session = {
++      sendMouseMove: vi.fn(),
++      sendMouseButton: vi.fn(),
++      releaseAllInputs: vi.fn(),
++    } as unknown as BrowserRemoteSession;
++    let controller: ReturnType<typeof useRemoteInputController> | undefined;
++    const view = render(
++      <Harness
++        session={session}
++        onError={onError}
++        onController={(next) => {
++          controller = next;
++        }}
++      />,
++    );
++    await waitFor(() => expect(controller?.inputControlActive).toBe(true));
++    const stage = view.getByTestId("stage") as HTMLDivElement;
++    stage.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 500);
++    const video = stage.querySelector("video")!;
++    Object.defineProperty(video, "videoWidth", { value: 1000, configurable: true });
++    Object.defineProperty(video, "videoHeight", { value: 500, configurable: true });
++    stage.setPointerCapture = vi.fn();
++    stage.hasPointerCapture = vi.fn(() => true);
++    stage.releasePointerCapture = vi.fn();
++    vi.mocked(stage[failingMethod]).mockImplementation(() => {
++      throw new DOMException("No active pointer", "NotFoundError");
++    });
++    flushFrames();
++
++    act(() => {
++      controller?.handleRemoteStagePointerDown(pointerEvent(stage, 200, 210));
++      if (endEvent === "blur") fireEvent.blur(window);
++      else if (endEvent === "pointercancel") {
++        controller?.handleRemoteStagePointerCancel(pointerEvent(stage, 200, 210));
++      } else {
++        controller?.handleRemoteStagePointerUp(pointerEvent(stage, 200, 210));
++      }
++      controller?.handleRemoteStagePointerCancel(pointerEvent(stage, 200, 210));
++      controller?.handleRemoteStagePointerUp(pointerEvent(stage, 200, 210));
++    });
++
++    expect(session.sendMouseButton).toHaveBeenNthCalledWith(1, { action: "mousePress", button: "primary" });
++    if (endEvent === "blur") {
++      expect(session.sendMouseButton).toHaveBeenCalledOnce();
++      expect(session.releaseAllInputs).toHaveBeenCalledOnce();
++    } else {
++      expect(session.sendMouseButton).toHaveBeenNthCalledWith(2, { action: "mouseRelease", button: "primary" });
++      expect(session.sendMouseButton).toHaveBeenCalledTimes(2);
++    }
++    expect(onError).not.toHaveBeenCalled();
++  });
++
+   it("does not send a press when its critical position cannot be sent", async () => {
+     const onError = vi.fn();
+     const session = {
+@@ -125,9 +184,16 @@ describe("useRemoteInputController", () => {
+     const video = stage.querySelector("video")!;
+     Object.defineProperty(video, "videoWidth", { value: 1000, configurable: true });
+     Object.defineProperty(video, "videoHeight", { value: 500, configurable: true });
++    stage.hasPointerCapture = vi.fn(() => true);
++    stage.releasePointerCapture = vi.fn(() => {
++      throw new DOMException("No active pointer", "NotFoundError");
++    });
+     flushFrames();
+ 
+-    act(() => controller?.handleRemoteStagePointerDown(pointerEvent(stage, 200, 210)));
++    act(() => {
++      controller?.handleRemoteStagePointerDown(pointerEvent(stage, 200, 210));
++      controller?.handleRemoteStagePointerUp(pointerEvent(stage, 200, 210));
++    });
+ 
+     expect(session.sendMouseMove).toHaveBeenCalledOnce();
+     expect(session.sendMouseButton).not.toHaveBeenCalled();

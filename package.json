@@ -1,0 +1,33 @@
+{
+  "name": "uu-bridge",
+  "version": "0.2.0",
+  "description": "Local-only UU Remote browser controller bridge and MCP server for human-in-the-loop AI Agent remote control",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "uubridge-mcp": "./agent/mcp-server.mjs"
+  },
+  "keywords": [
+    "uu-remote",
+    "remote-desktop",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "macos",
+    "webrtc"
+  ],
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "setup:web": "node scripts/setup-web.mjs",
+    "start": "node server.mjs",
+    "start:web": "node scripts/start-web.mjs",
+    "mcp": "node agent/mcp-server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "verify:local": "node scripts/verify-local.mjs",
+    "verify:web": "node scripts/verify-web.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>UU Bridge · 本地远程控制中心</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="workspace">
+      <header class="masthead">
+        <a class="brand" href="/" aria-label="UU Bridge 首页">
+          <span class="brand-mark" aria-hidden="true">u<span>u</span></span>
+          <span>UU Bridge<small>本地远程控制 · MCP 协同桥接</small></span>
+        </a>
+        <div class="masthead-actions">
+          <a class="button primary nav-cta" href="/web-controller" target="_blank" rel="noopener">打开 UU 网页主控 <span aria-hidden="true">↗</span></a>
+          <div class="theme-switcher" role="group" aria-label="外观主题">
+            <button type="button" class="theme-option" data-theme-choice="system" aria-pressed="true">跟随系统</button>
+            <button type="button" class="theme-option" data-theme-choice="light" aria-pressed="false">浅色</button>
+            <button type="button" class="theme-option" data-theme-choice="dark" aria-pressed="false">深色</button>
+          </div>
+          <div class="local-label"><span class="status-dot"></span>仅本机 <span class="mono">127.0.0.1</span></div>
+        </div>
+      </header>
+
+      <section id="quickstartCard" class="quickstart" aria-label="快速开始">
+        <div class="quickstart-head">
+          <div>
+            <span class="quickstart-badge">推荐方式 · 支持 AI Agent 远程操控</span>
+            <h2>三步开始通过浏览器与 MCP 操控远端电脑</h2>
+          </div>
+          <div class="quickstart-actions">
+            <a class="button primary compact" href="/web-controller" target="_blank" rel="noopener">进入本地 UU 网页主控 <span aria-hidden="true">↗</span></a>
+            <button id="copyMcpConfig" class="button secondary compact" type="button">复制 MCP 配置 <span aria-hidden="true">⎘</span></button>
+          </div>
+        </div>
+        <ol class="quickstart-steps">
+          <li>
+            <span class="step-index">1</span>
+            <div>
+              <strong>在本地网页登录 UU</strong>
+              <p>打开「UU 网页主控」登录账号并连接目标电脑，凭证只留在本机。</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-index">2</span>
+            <div>
+              <strong>右下角一键授权</strong>
+              <p>确认远端画面正常后，在网页右下角控制条点「允许 Agent 控制」。</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-index">3</span>
+            <div>
+              <strong>随时盯着、随时接管</strong>
+              <p>用 Codex / Claude / OpenCode 远程操作，随时可点「暂停接管」收回键鼠。</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <main class="workbench">
+        <section class="viewer" aria-label="窗口画面">
+          <div class="viewer-toolbar">
+            <div class="viewer-heading">
+              <span id="streamDot" class="status-dot muted"></span>
+              <span id="streamStatus">画面未开始</span>
+              <span id="windowKind" class="tag" hidden>验证窗口</span>
+            </div>
+            <div class="zoom-control">
+              <label for="zoom">缩放</label>
+              <select id="zoom">
+                <option value="fit">适应窗口</option>
+                <option value="0.75">75%</option>
+                <option value="1">100%</option>
+                <option value="1.25">125%</option>
+                <option value="1.5">150%</option>
+              </select>
+            </div>
+          </div>
+          <div id="viewport" class="viewport" tabindex="0" aria-label="窗口画面，开启控制后点击此处使用键盘">
+            <div id="frameSurface" class="frame-surface"><img id="frame" alt="所选窗口的实时画面" draggable="false" hidden></div>
+            <div id="emptyState" class="empty-state">
+              <div class="empty-icon" aria-hidden="true"><span></span><i></i></div>
+              <span class="eyebrow">本机窗口查看 · 验证工作台</span>
+              <h1 id="emptyTitle">把 UU 窗口，放到这里。</h1>
+              <p id="emptyDescription">正在连接本机桥接服务…</p>
+            </div>
+          </div>
+          <div class="viewer-footer">
+            <span id="frameInfo" class="mono">— × —</span>
+            <span id="inputHint">仅查看 · 输入控制已关闭</span>
+            <span class="capture-note">原客户端窗口只读查看 · 远控请用上方网页主控</span>
+          </div>
+        </section>
+
+        <aside class="sidebar" aria-label="桥接设置">
+          <section class="sidebar-section connection-section">
+            <div class="section-heading"><h2>连接准备</h2><span class="section-number">01</span></div>
+            <dl class="permission-list">
+              <div><dt>原生助手</dt><dd id="nativeStatus" class="state-label">检测中</dd></div>
+              <div><dt>屏幕录制</dt><dd id="screenStatus" class="state-label">检测中</dd></div>
+              <div><dt>辅助功能</dt><dd id="accessStatus" class="state-label">检测中</dd></div>
+              <div><dt>UU 客户端</dt><dd id="uuStatus" class="state-label">检测中</dd></div>
+            </dl>
+            <div class="button-pair">
+              <button id="screenPermission" class="button secondary" type="button">屏幕录制授权 <span aria-hidden="true">↗</span></button>
+              <button id="accessPermission" class="button secondary" type="button">辅助功能授权 <span aria-hidden="true">↗</span></button>
+            </div>
+            <p class="field-note">仅本机窗口查看需要系统权限；使用上方「UU 网页主控」无需此权限。</p>
+          </section>
+
+          <section class="sidebar-section">
+            <div class="section-heading"><h2>选择本机窗口</h2><span class="section-number">02</span></div>
+            <label class="sr-only" for="windowSelect">要采集的窗口</label>
+            <select id="windowSelect" class="window-select" disabled><option value="">正在查找窗口…</option></select>
+            <p id="windowDescription" class="field-note">只采集所选窗口，不采集整个桌面。</p>
+            <div class="button-pair">
+              <button id="refreshWindows" class="button secondary" type="button">刷新窗口 <span aria-hidden="true">↻</span></button>
+              <button id="openUU" class="button secondary" type="button">打开 UU <span aria-hidden="true">↗</span></button>
+            </div>
+            <button id="streamToggle" class="button primary" type="button" disabled><span id="streamButtonIcon" aria-hidden="true">▷</span><span id="streamButtonText">开始画面</span></button>
+          </section>
+
+          <section class="sidebar-section control-section">
+            <div class="section-heading">
+              <h2>本机窗口输入</h2>
+              <label class="switch">
+                <input id="controlToggle" type="checkbox" role="switch" disabled aria-label="开启本机窗口输入控制">
+                <span aria-hidden="true"></span>
+              </label>
+            </div>
+            <p id="controlDescription" class="field-note">默认关闭。仅对自带验证窗口开放；控制真实远端请使用「UU 网页主控」。</p>
+            <a id="openWebController" class="button secondary" href="/web-controller" target="_blank" rel="noopener">打开本地 UU 网页主控 <span aria-hidden="true">↗</span></a>
+            <form id="textForm">
+              <label for="textInput" class="text-label">发送文字（验证窗口）</label>
+              <div class="text-composer">
+                <textarea id="textInput" rows="2" placeholder="输入要发送的文字…" disabled></textarea>
+                <button id="sendText" class="send-button" type="submit" disabled aria-label="发送文字">↑</button>
+              </div>
+            </form>
+            <p class="field-note keyboard-note">点击画面后使用键盘 · 右键 / 滚轮 / 拖动</p>
+          </section>
+
+          <div class="sidebar-bottom">
+            <details class="verification">
+              <summary>本机输入验证窗口 <span aria-hidden="true">＋</span></summary>
+              <p class="field-note">打开无害测试窗口，验证网页显示与原生输入闭环。此结果不代表官方客户端已接受后台输入。</p>
+              <button id="openTest" class="button secondary" type="button">打开验证窗口 <span aria-hidden="true">↗</span></button>
+            </details>
+            <div id="notice" class="notice" role="status" aria-live="polite">正在初始化本机会话…</div>
+          </div>
+        </aside>
+      </main>
+      <footer class="page-footer">
+        <span>本地运行 · 仅监听 127.0.0.1</span>
+        <span>网页主控直通 UU 协议 · 原客户端桥接仅作只读查看</span>
+      </footer>
+    </div>
+  </body>
+</html>
