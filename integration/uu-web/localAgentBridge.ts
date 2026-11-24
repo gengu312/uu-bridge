@@ -88,6 +88,111 @@ const THEME_STYLE_ID = "uubridge-theme-override";
 
 type ThemeMode = "system" | "light" | "dark";
 
+const PAGE_LIGHT_THEME_CSS = `
+:root {
+  color-scheme: light;
+}
+.control-shell {
+  --dark-bg: #f4f6f9;
+  --dark-bg-pure: #e9edf3;
+  --dark-panel: #ffffff;
+  --dark-border: #dde3ec;
+  --dark-surface-1: #f8fafc;
+  --dark-surface-2: #edf2f7;
+  --dark-text: #0f172a;
+  --dark-text-muted: #475569;
+  --dark-text-dim: #64748b;
+  --dark-toolbar-bg: rgba(255, 255, 255, 0.94);
+  --dark-scrim: rgba(15, 23, 42, 0.22);
+  --dark-success: #15803d;
+  --dark-success-dot: #16a34a;
+  --dark-success-bg: #f0fdf4;
+  --dark-warn: #b45309;
+  --dark-warn-dot: #d97706;
+  --dark-warn-bg: #fffbeb;
+  --dark-idle-dot: #64748b;
+  --dark-idle-bg: #e2e8f0;
+  --dark-danger: #dc2626;
+}
+.control-topbar--overlay {
+  background: rgba(255, 255, 255, 0.9) !important;
+}
+.control-command-bar {
+  color: var(--dark-text) !important;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12) !important;
+}
+.control-command-bar--docked {
+  background: #f1f5f9 !important;
+  box-shadow: none !important;
+}
+.control-command-bar button,
+.shortcut-menu > summary {
+  color: #334155 !important;
+}
+.control-command-bar button:hover:not(:disabled),
+.shortcut-menu > summary:hover {
+  border-color: #cbd5e1 !important;
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+.control-command-bar .primary-action-button,
+.control-command-bar .control-mode-switch button.is-active {
+  color: #ffffff !important;
+}
+.control-command-bar .control-mode-switch {
+  background: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+.control-command-bar .control-mode-switch button {
+  color: #475569 !important;
+}
+.control-command-bar .control-mode-switch button:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.06) !important;
+  color: #0f172a !important;
+}
+.control-command-bar .operation-note,
+.shortcut-menu-chevron,
+.shortcut-menu-group h3 {
+  color: #64748b !important;
+}
+.control-command-bar .remote-input-row input {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+.control-command-bar .remote-input-row input::placeholder {
+  color: #94a3b8 !important;
+}
+.shortcut-menu-panel,
+.screen-picker-panel {
+  border-color: #dde3ec !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14) !important;
+}
+.screen-picker-panel button.is-active {
+  color: #1d4ed8 !important;
+  background: #eff6ff !important;
+}
+.video-source-silent-toggle {
+  border-color: #cbd5e1 !important;
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+}
+.video-source-silent-toggle:hover,
+.video-source-silent-toggle:focus-visible {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+.reconnect-banner {
+  background: rgba(255, 251, 235, 0.96) !important;
+  border-color: #fcd34d !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12) !important;
+}
+.control-shell .remote-stage {
+  border-color: #cbd5e1;
+}
+`;
+
 const PAGE_DARK_THEME_CSS = `
 :root {
   color-scheme: dark;
@@ -1250,16 +1355,12 @@ export class LocalAgentBridgeRuntime {
     document.documentElement.dataset.uubridgeTheme = resolved;
     document.documentElement.style.colorScheme = resolved;
     let styleEl = document.getElementById(THEME_STYLE_ID) as HTMLStyleElement | null;
-    if (resolved === "dark") {
-      if (!styleEl) {
-        styleEl = document.createElement("style");
-        styleEl.id = THEME_STYLE_ID;
-        document.head.appendChild(styleEl);
-      }
-      styleEl.textContent = PAGE_DARK_THEME_CSS;
-    } else if (styleEl) {
-      styleEl.remove();
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = THEME_STYLE_ID;
+      document.head.appendChild(styleEl);
     }
+    styleEl.textContent = resolved === "dark" ? PAGE_DARK_THEME_CSS : PAGE_LIGHT_THEME_CSS;
   }
 
   private mountControlBar(): void {

@@ -218,15 +218,16 @@ describe("localAgentBridge", () => {
     await vi.waitFor(() => expect(viewerControls.some((c) => c.operation === "pause")).toBe(true));
     expect(session.releaseAllInputs).toHaveBeenCalled();
 
-    // Theme switching defaults to system and toggles light/dark cleanly
+    // Theme switching defaults to system and toggles light/dark cleanly (including .control-shell light theme)
     const darkBtn = barRoot?.querySelector<HTMLButtonElement>('[data-theme-mode="dark"]');
     const lightBtn = barRoot?.querySelector<HTMLButtonElement>('[data-theme-mode="light"]');
     darkBtn?.click();
     expect(document.documentElement.dataset.uubridgeTheme).toBe("dark");
-    expect(document.getElementById("uubridge-theme-override")).not.toBeNull();
+    expect(document.getElementById("uubridge-theme-override")?.textContent).toContain("--bg: #0f1115");
     lightBtn?.click();
     expect(document.documentElement.dataset.uubridgeTheme).toBe("light");
-    expect(document.getElementById("uubridge-theme-override")).toBeNull();
+    expect(document.getElementById("uubridge-theme-override")?.textContent).toContain(".control-shell");
+    expect(document.getElementById("uubridge-theme-override")?.textContent).toContain("--dark-panel: #ffffff");
 
     runtime.stop();
   });
