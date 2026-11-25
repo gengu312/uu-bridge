@@ -103,6 +103,13 @@ npm run verify:local
 
 > 边界说明：UU 协议本身不提供远端 OS 原生无障碍树（AX/UIA）、锁屏状态查询或独立文件传输通道，因此不包含 CrossDesk 的 `desktop_automation` / `unlock` / `files` 工具。
 
+### 4. Agent Skills（`SKILL.md`）
+
+仓库的 `skills/` 目录提供两套遵循开放 `SKILL.md` 规范的 Agent 技能，可直接复制到 Claude Code / Cursor / Codex / Gemini CLI 等工具的技能目录，或打包上架至技能市场：
+
+- **[`skills/uu-bridge-mcp/`](skills/uu-bridge-mcp/SKILL.md)**（配套操作技能）：配合本项目的 `uubridge` MCP Server 使用，约束 Agent 遵守“零凭证泄露、先观测后点击、图像像素坐标系、`operation_id` 幂等、尊重 `CONTROL_DENIED` / `HUMAN_PAUSED` 人工接管”等规则，并附 12 个工具与错误码速查表（`references/tool-reference.md`）。仅包含操作说明，不含第三方协议代码。
+- **[`skills/hitl-gui-mcp-architect/`](skills/hitl-gui-mcp-architect/SKILL.md)**（通用架构与审计技能，不绑定网易 UU）：将本项目沉淀的人机协同 GUI MCP 工程不变量抽离为协议无关的通用指南，包含 7 条生产不变量、可复用 JSON Schema 与坐标投影/幂等缓存参考（`references/protocol-contract.md`）以及 20 项安全可靠性审计清单与最低测试矩阵（`references/security-audit-checklist.md`），适用于 WebRTC、VNC、RDP、Playwright、模拟器或原生 OS 自动化 MCP 的设计与审计。
+
 ## 原客户端桥接 Agent 接口（仅查看 / 本机验证窗口）
 
 先在本机 `GET /api/session` 获取本次服务进程的令牌，其余接口使用 `X-UUBridge-Token` 请求头。
@@ -134,6 +141,6 @@ npm run verify:local
 
 ## 开源协议与免责声明
 
-- **许可证**：本仓库原创代码（`agent/`、`server.mjs`、`public/`、`native/`、`scripts/`、`integration/`、`test/`）采用 **[MIT License](LICENSE)** 开源；拉取至 `vendor/uu-web/` 的第三方网页主控遵循其原有的 MIT 许可证。
+- **许可证**：本仓库原创代码与文档（`agent/`、`skills/`、`server.mjs`、`public/`、`native/`、`scripts/`、`integration/`、`test/`）采用 **[MIT License](LICENSE)** 开源；拉取至 `vendor/uu-web/` 的第三方网页主控遵循其原有的 MIT 许可证。
 - **非官方声明**：本项目为个人开源实验与本地工具，与网易 UU 远程官方无任何隶属、合作或授权关系。
 - **合规与安全边界**：仅限个人学习及在已获得明确授权的设备上本地使用（默认仅监听 `127.0.0.1`），不提取官方客户端凭证、不绕过系统权限授权。请勿将本工具用于未授权的远程访问，使用者需自行遵守当地法律法规及第三方软件服务条款。
