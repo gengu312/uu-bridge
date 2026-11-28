@@ -1,73 +1,78 @@
 # UU Bridge
 
-本项目包含两个独立的本地入口：
+<p>
+  <a href="./README.md"><img src="https://img.shields.io/badge/Docs-English-2563EB?style=flat-square" alt="English" /></a>
+  <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-64748B?style=flat-square" alt="简体中文" /></a>
+</p>
 
-- `http://127.0.0.1:18787`：官方客户端窗口查看桥接。画面已通过真实 UU 验证；UU 4.46.0 未接受后台模拟输入，真实 UU 的输入开关已禁用。自带验证窗口仍可测试原生输入。
-- `http://127.0.0.1:18787/web-controller`：独立开源 UU 网页主控的便捷入口，内部运行在 `127.0.0.1:18789`，源码在 `vendor/uu-web`。直接通过 UU 协议传送画面和键鼠，需要用户在自建网页中登录一次 UU 账号；不提取官方客户端凭证。入口自动建立本机会话，不需要复制或展示带令牌的 URL。构建与登录后真实控制需分别验证。
-- `npm run mcp`（`agent/mcp-server.mjs`）：参考 [CrossDesk MCP](https://github.com/kunkundi/crossdesk) 工程方案实现的本地 **MCP (Model Context Protocol) 远控服务**。零新增外部依赖，通过本机 `127.0.0.1:18789` 的独立 Agent Broker 桥接你在浏览器中打开的 UU 网页主控，让 AI Agent 能够安全、可靠地观察和操控远端电脑，同时保留人类实时旁观与一键接管能力。
+This project includes two independent local web entry points (along with a built-in MCP server):
 
-窗口桥接的登录、连接及网络传输由官方客户端完成，不读取账号、验证码或登录态。网页主控是独立服务，不等于官方客户端画面的再次投屏。
+- `http://127.0.0.1:18787`: Official client window viewer bridge. Video capture has been verified against the real UU client; UU 4.46.0 does not accept background simulated input, so the input toggle for real UU windows is disabled. The built-in verification window can still be used to test native input.
+- `http://127.0.0.1:18787/web-controller`: Convenient entry point for the standalone open-source UU web controller, running internally on `127.0.0.1:18789` with source code in `vendor/uu-web`. It transmits video, keyboard, and mouse input directly over the UU protocol and requires signing in to your UU account once inside the self-hosted web UI; it never extracts credentials from the official client. The entry point automatically establishes a local session without copying or exposing token-bearing URLs. Build completion and actual remote control after sign-in must be verified separately.
+- `npm run mcp` (`agent/mcp-server.mjs`): A local **MCP (Model Context Protocol) remote-control server** inspired by the engineering design of [CrossDesk MCP](https://github.com/kunkundi/crossdesk). With zero added external dependencies, it bridges the UU web controller open in your browser via a standalone Agent Broker on `127.0.0.1:18789`, enabling AI Agents to safely and reliably observe and operate a remote computer while preserving real-time human viewing and one-click takeover.
 
-## 运行
+Sign-in, connection management, and network transport for the window bridge are handled entirely by the official client; it does not read accounts, verification codes, or login state. The web controller is an independent service, not a re-stream of the official client's window.
 
-独立网页主控已准备后，在项目根目录执行 `npm run start:web`；原桥接服务也保持 `npm start` 运行。然后打开 <http://127.0.0.1:18787/web-controller>，或点击原页面的“打开本地 UU 网页主控”。需要在自建网页中登录 UU；若官方本机主控仍占用同一设备，先断开其控制会话，再从网页连接同一台设备。对方的官方 UU 被控端继续运行。
+## Running
 
-首次准备独立网页主控可直接运行一键脚本（自动拉取锁定基线提交的 [ofoz/uu_web](https://github.com/ofoz/uu_web)、应用 `integration/uu-web/` 最小本地桥接适配并按 `shared → backend → frontend` 顺序构建，保留上游 MIT 许可证）：
+Once the standalone web controller is set up, run `npm run start:web` from the project root while keeping the original bridge service running with `npm start`. Then open <http://127.0.0.1:18787/web-controller>, or click "Open Local UU Web Controller" ("打开本地 UU 网页主控") on the original page. Sign in to UU in the self-hosted web UI; if the official local controller client is still occupying the same target device, disconnect its control session first before connecting to that device from the web UI. The remote machine continues running the official UU controlled client.
+
+For first-time setup of the standalone web controller, run the one-command setup script (automatically fetches [ofoz/uu_web](https://github.com/ofoz/uu_web) at a pinned baseline commit, applies minimal local bridge adaptations from `integration/uu-web/`, and builds in `shared → backend → frontend` order while preserving the upstream MIT license):
 
 ```bash
 npm run setup:web
 ```
 
-以后启动只需执行 `npm run start:web` 与 `npm start`，无需重复安装或构建。两个本地页面均支持 **浅色 / 深色主题（默认跟随系统）**，可随时在界面中手动切换。
+On subsequent launches, simply run `npm run start:web` and `npm start`—no repeated installation or build is needed. Both local pages support **Light / Dark themes (following system preference by default)** and can be switched manually in the UI at any time.
 
-以下命令只启动原客户端窗口查看桥接：
+The commands below start only the original official-client window viewer bridge:
 
-需要 macOS 14+、Xcode Command Line Tools（含 Swift）、Node.js 22+。无需 npm 安装依赖、无需 Docker、无需服务器。
+Requires macOS 14+, Xcode Command Line Tools (including Swift), and Node.js 22+. No npm dependency installation, no Docker, and no external server required.
 
 ```bash
 npm run build
 npm start
 ```
 
-打开 <http://127.0.0.1:18787>。服务只监听本机，退出终端中的服务即可停止桥接。端口冲突时可以使用 `PORT=18788 npm start`。
+Open <http://127.0.0.1:18787>. The service listens on localhost only; stop the terminal process to shut down the bridge. If the port is occupied, run `PORT=18788 npm start`.
 
-1. 在官方 UU 客户端中登录并连接对方电脑。
-2. 在网页中刷新窗口，选择对应 UU 窗口。
-3. 按网页提示授权屏幕录制和辅助功能，然后刷新权限状态。
-4. 点击开始画面。真实 UU 窗口在这个入口只能查看；实际远控使用独立网页主控。输入开关只对本项目自带的验证窗口开放。
+1. Sign in and connect to the remote computer in the official UU client.
+2. Refresh the window list in the web UI and select the corresponding UU window.
+3. Grant Screen Recording and Accessibility permissions as prompted by the web UI, then refresh permission status.
+4. Click Start Stream. Real UU windows are view-only through this entry point; use the standalone web controller for actual remote control. The input toggle is open only to this project's built-in verification window.
 
-本机验证窗口支持在画面内点击、右键、拖动、滚动，以及常用按键和侧栏文字发送。文字插入当前光标处，不自动覆盖已有内容。后台 macOS 验证窗口的 Command+A 实测未生效，普通 Backspace 可用。这些验证结果不代表官方 UU 接受了后台输入。
+The local verification window supports in-frame left-click, right-click, drag, scroll, common keys, and sidebar text input. Sent text is inserted at the current cursor position without automatically overwriting existing content. In testing, `Command+A` did not take effect on the background macOS verification window, while standard `Backspace` works. These verification results do not imply that the official UU client accepts background input.
 
-## 权限
+## Permissions
 
-原生程序位于 `.build/UU Bridge.app`。系统可能把权限归属给启动它的终端或 OpenChamber，按实际弹出的应用名称授权。系统设置 → 隐私与安全性 → 屏幕与系统音频录制 / 辅助功能。授权后刷新状态；若系统要求退出重开，重启桥接服务。
+The native app bundle is located at `.build/UU Bridge.app`. macOS may attribute permission requests to the terminal app or OpenChamber that launched it—grant permissions to whichever application macOS prompts for under **System Settings → Privacy & Security → Screen & System Audio Recording / Accessibility**. Refresh status after granting; if macOS requires quitting and reopening, restart the bridge service.
 
-不修改系统权限数据库、不绕过系统确认。截图不自动保存；接口只允许采集选定的 UU / 验证窗口，原生输入只对自带验证窗口开放。不会为绕过 UU 输入限制而自动抢占本机键鼠。
+This project never modifies system permission databases or bypasses macOS confirmation prompts. Screenshots are not saved to disk automatically; endpoints only allow capturing selected UU or verification windows, and native input is restricted exclusively to the built-in verification window. It will never hijack local mouse/keyboard focus to work around UU input restrictions.
 
-## 验证
+## Verification
 
-网页“本机输入验证”可打开一个独立的无害窗口。选择该窗口后，从浏览器点击计数按钮、点击输入框并发送文字。输入与 UU 使用相同的路径；画面由验证窗口自身的视图绘制，不读取屏幕，因此没有屏幕录制权限也能验证浏览器与原生输入的闭环。网页会标明“应用自身绘制”；这不能证明真实 UU 的 ScreenCaptureKit 采集已经通过。
+"Local Input Verification" ("本机输入验证") in the web UI opens an isolated, harmless window. Select that window, click the counter button from the browser, focus the text input, and send text. Input uses the exact same path as UU; however, frames are rendered directly by the verification window's own view without reading the screen, allowing closed-loop verification between browser and native input even without Screen Recording permission. The web UI explicitly marks this as "App Self-Rendered" ("应用自身绘制"); passing this check does not prove that real UU `ScreenCaptureKit` capture has passed.
 
 ```bash
 npm test
 npm run verify:local
 ```
 
-`verify:local` 要求服务已运行，会打开本项目的验证窗口，实际检查后台点击、Unicode 输入、Backspace、过期目标拒绝和释放后迟到输入的拒绝。它不会请求系统权限或连接远端。接口保护测试只验证本机请求鉴权、来源校验和输入校验，不等于真实窗口或远端操作通过。实际测试记录见 `VERIFICATION.md`。
+`verify:local` requires the server to be running. It opens the project's verification window and checks background clicks, Unicode text input, Backspace, stale-target rejection, and late-input rejection after release. It does not request OS permissions or connect to any remote machine. API protection tests verify local request authentication, origin validation, and input validation only—they do not equate to passing real window capture or remote operations. See `VERIFICATION.md` for actual verification records.
 
-## MCP 远程 Agent 操控（推荐，基于 UU 网页主控）
+## MCP Remote Agent Control (Recommended, via UU Web Controller)
 
-借鉴 CrossDesk MCP 的远程 Agent 操控设计，本机 UU 网页主控（`127.0.0.1:18789`）现已内置轻量级 **Agent Broker**（`agent/broker.mjs`）和浏览器端零侵入协同控制条（Shadow DOM，不重构上游页面）。
+Inspired by CrossDesk MCP's remote Agent control design, the local UU web controller (`127.0.0.1:18789`) includes a built-in lightweight **Agent Broker** (`agent/broker.mjs`) and a zero-intrusion browser collaboration control bar (Shadow DOM, without refactoring upstream pages).
 
-### 1. 启动与连接流程
+### 1. Startup & Connection Workflow
 
-1. 启动本地 UU 网页主控（以及可选的原桥接跳转入口）：
+1. Start the local UU web controller (and optionally the original bridge redirect entry):
    ```bash
    npm run start:web
    npm start
    ```
-2. 在本机浏览器打开 <http://127.0.0.1:18787/web-controller>（或读取 `output/uu-web-local-access.json` 中的 `loginUrl`），自行登录 UU 并连接目标远端设备。
-3. 在 MCP 客户端（Codex / Claude Code / OpenCode / T3 Code 等）中配置标准 stdio MCP Server：
+2. Open <http://127.0.0.1:18787/web-controller> in your local browser (or read `loginUrl` from `output/uu-web-local-access.json`), sign in to UU yourself, and connect to the target remote device.
+3. Configure the standard stdio MCP Server in your MCP client (Codex / Claude Code / OpenCode / T3 Code, etc.):
    ```json
    {
      "mcpServers": {
@@ -78,69 +83,69 @@ npm run verify:local
      }
    }
    ```
-4. 默认连接处于**仅观察（Observe-Only）**状态。确认画面正常后，在网页右下角的 **Agent 协同控制条**点击「允许 Agent 控制」即可授权；随时点击「暂停接管」、点击「释放按键」，或**直接在远控画面上移动点击/敲键（默认触发自动暂停）**，即可立即中断正在执行的动作并收回控制权。
+4. Connections start in **Observe-Only** mode by default. Once you confirm the stream looks normal, click **"Allow Agent Control"** ("允许 Agent 控制") in the **Agent Collaboration Bar** at the bottom-right corner of the page to authorize control. At any moment, click **"Pause & Take Over"** ("暂停接管"), click **"Release Inputs"** ("释放按键"), or **simply move/click/type directly on the remote stream (triggers auto-pause by default)** to immediately interrupt running actions and reclaim control.
 
-### 2. 核心工程机制
+### 2. Core Engineering Mechanisms
 
-- **像素级原画采集与直通 UU 协议**：直接从 WebRTC `<video>` 按原分辨率裁剪/缩放导出 PNG（无任何网页 UI 干扰），并通过 `BrowserRemoteSession` 的 UU DataChannel 原生发送键鼠、中文 `text_input` 与剪贴板，不依赖本机系统 `CGEvent` 注入。
-- **双通道鉴权隔离**：浏览器协同接口（`/__uubridge/agent/*`）仅认 `HttpOnly` 本地会话 Cookie；Agent 接口（`/__uubridge/mcp/*`）仅认 `output/uu-web-local-access.json`（mode `0600`）中的独立 `agentToken`。Agent 无法自行调用 `viewer-control` 授权或解除人类暂停；`uu_open_panel` 绝不向模型上下文泄露登录令牌或密码。
-- **观测绑定与防错**：每次截屏签发不可变 `observation_id`、`generation`、`geometry_epoch`、`image_size` 与 `region`。所有动作坐标基于最近截图的像素空间并自动映射回源视频坐标；分辨率变化、切换显示器或重连会立即使旧观测失效。
-- **幂等操作与高效序列**：`uu_action` 强制携带 `operation_id`（128 条 / 5 分钟缓存，参数冲突返回 `OPERATION_CONFLICT`），支持 1–8 步 `sequence` 连续动作，默认 `observe_after: true` 在浏览器端等待画面变化/稳定后直接随结果附带一帧最新 PNG。
-- **长按租约防卡键**：`key_down` / `mouse_down` 具有 15 秒自动过期租约，超时、报错、切屏、断连或人类暂停都会自动执行 `releaseAllInputs()`。
+- **Pixel-Accurate Native Frame Capture & Direct UU Protocol Transport**: Crops/scales and exports PNGs directly from the WebRTC `<video>` at native resolution (free of web UI chrome), and sends mouse/keyboard events, Chinese/Unicode `text_input`, and clipboard updates natively over `BrowserRemoteSession`'s UU DataChannel—without relying on local macOS `CGEvent` injection.
+- **Dual-Channel Authentication Isolation**: Browser collaboration routes (`/__uubridge/agent/*`) accept only the `HttpOnly` local session cookie; Agent routes (`/__uubridge/mcp/*`) accept only the independent `agentToken` stored in `output/uu-web-local-access.json` (mode `0600`). Agents cannot call `viewer-control` to self-authorize or clear a human pause; `uu_open_panel` never leaks login tokens or passwords into model context.
+- **Observation Binding & Error Prevention**: Every screenshot issues an immutable `observation_id`, `generation`, `geometry_epoch`, `image_size`, and `region`. All action coordinates are based on the pixel space of the latest screenshot and automatically mapped back to source video coordinates; resolution changes, display switches, or reconnections immediately invalidate stale observations.
+- **Idempotent Operations & Multi-Step Sequences**: `uu_action` enforces an `operation_id` (128-entry / 5-minute cache; parameter conflicts return `OPERATION_CONFLICT`), supports 1–8 step `sequence` batches, and defaults to `observe_after: true` to wait in-browser for visual change/stability before returning a fresh PNG frame alongside the action result.
+- **Hold Leases Against Stuck Keys**: `key_down` / `mouse_down` carry an automatic 15-second expiration lease; timeouts, errors, display switches, disconnects, or human pauses automatically execute `releaseAllInputs()`.
 
-### 3. MCP 工具列表
+### 3. MCP Tool Reference
 
-- `uu_open_panel`：检查本地 UU 网页主控状态并可选打开系统浏览器（不泄露令牌）。
-- `uu_list_sessions` / `uu_get_session`：列出已连接设备或有界等待（≤25s）设备就绪。
-- `uu_screenshot`：截取整屏或裁剪区域 PNG（返回独立 MCP `image` 块 + 观测元数据）。
-- `uu_action`：执行单步动作（`click` / `double_click` / `move` / `mouse_down` / `mouse_up` / `scroll` / `drag` / `key_press` / `key_down` / `key_up` / `hotkey` / `type_text`）或 1–8 步 `sequence`。
-- `uu_wait`：等待上次观测区域出现视觉变化（`changed`）或趋于稳定（`stable`）并返回最新截图。
-- `uu_release_inputs`：立即释放所有长按键鼠并中止进行中的序列。
-- `uu_set_control`：在人类已授权且未暂停范围内开关 Agent 控制（无法越权）。
-- `uu_clipboard_get` / `uu_clipboard_set`：读写远端文本剪贴板（主动读取目前主要支持 macOS 被控端，Windows 依赖远端复制通知）。
-- `uu_select_display`：切换远端多路视频源（多显示器）并使旧观测失效。
-- `uu_disconnect`：断开远端设备连接并释放输入。
+- `uu_open_panel`: Check local UU web controller status and optionally open the system browser (without leaking tokens).
+- `uu_list_sessions` / `uu_get_session`: List connected devices or wait with a bounded timeout (≤25s) until a device session is ready.
+- `uu_screenshot`: Capture a full-screen or cropped-region PNG (returns a standalone MCP `image` content block + observation metadata).
+- `uu_action`: Execute a single action (`click` / `double_click` / `move` / `mouse_down` / `mouse_up` / `scroll` / `drag` / `key_press` / `key_down` / `key_up` / `hotkey` / `type_text`) or a 1–8 step `sequence`.
+- `uu_wait`: Wait for the previously observed region to visually change (`changed`) or stabilize (`stable`) and return the latest screenshot.
+- `uu_release_inputs`: Immediately release all held keys/mouse buttons and abort any running sequence.
+- `uu_set_control`: Toggle Agent control on/off within the scope already authorized by the human user and while not paused (cannot escalate privileges).
+- `uu_clipboard_get` / `uu_clipboard_set`: Read/write remote plain-text clipboard (active clipboard read currently primarily supports macOS controlled hosts; Windows depends on remote copy notifications).
+- `uu_select_display`: Switch between remote multi-stream video sources (multi-monitor) and invalidate old observations.
+- `uu_disconnect`: Disconnect from the remote device and release all inputs.
 
-> 边界说明：UU 协议本身不提供远端 OS 原生无障碍树（AX/UIA）、锁屏状态查询或独立文件传输通道，因此不包含 CrossDesk 的 `desktop_automation` / `unlock` / `files` 工具。
+> Boundary Note: The UU protocol itself does not provide remote OS native accessibility trees (AX/UIA), lock-screen state queries, or a standalone file transfer channel; therefore CrossDesk's `desktop_automation` / `unlock` / `files` tools are not included.
 
-### 4. Agent Skills（`SKILL.md`）
+### 4. Agent Skills (`SKILL.md`)
 
-仓库的 `skills/` 目录提供两套遵循开放 `SKILL.md` 规范的 Agent 技能，可直接复制到 Claude Code / Cursor / Codex / Gemini CLI 等工具的技能目录，或打包上架至技能市场：
+The `skills/` directory provides two Agent skills conforming to the open `SKILL.md` specification, ready to copy directly into the skills folder of Claude Code / Cursor / Codex / Gemini CLI, or package for skill marketplaces:
 
-- **[`skills/uu-bridge-mcp/`](skills/uu-bridge-mcp/SKILL.md)**（配套操作技能）：配合本项目的 `uubridge` MCP Server 使用，约束 Agent 遵守“零凭证泄露、先观测后点击、图像像素坐标系、`operation_id` 幂等、尊重 `CONTROL_DENIED` / `HUMAN_PAUSED` 人工接管”等规则，并附 12 个工具与错误码速查表（`references/tool-reference.md`）。仅包含操作说明，不含第三方协议代码。
-- **[`skills/hitl-gui-mcp-architect/`](skills/hitl-gui-mcp-architect/SKILL.md)**（通用架构与审计技能，不绑定网易 UU）：将本项目沉淀的人机协同 GUI MCP 工程不变量抽离为协议无关的通用指南，包含 7 条生产不变量、可复用 JSON Schema 与坐标投影/幂等缓存参考（`references/protocol-contract.md`）以及 20 项安全可靠性审计清单与最低测试矩阵（`references/security-audit-checklist.md`），适用于 WebRTC、VNC、RDP、Playwright、模拟器或原生 OS 自动化 MCP 的设计与审计。
+- **[`skills/uu-bridge-mcp/`](skills/uu-bridge-mcp/SKILL.md)** (Companion Operational Skill): Used alongside this project's `uubridge` MCP Server to guide Agents in following strict operational invariants—"zero credential leakage, observe before clicking, image-pixel coordinate space, `operation_id` idempotency, and respecting `CONTROL_DENIED` / `HUMAN_PAUSED` human takeover"—complete with a 12-tool and error-code quick reference (`references/tool-reference.md`). Contains operational guidance only, with no third-party protocol code.
+- **[`skills/hitl-gui-mcp-architect/`](skills/hitl-gui-mcp-architect/SKILL.md)** (Vendor-Agnostic Architecture & Audit Skill): Distills the human-in-the-loop GUI MCP engineering invariants developed in this project into a protocol-independent guide, including 7 production invariants, reusable JSON Schemas, coordinate projection & idempotency cache references (`references/protocol-contract.md`), plus a 20-item security/reliability audit checklist and minimum test matrix (`references/security-audit-checklist.md`)—applicable to WebRTC, VNC, RDP, Playwright, emulator, or native OS automation MCP servers.
 
-## 原客户端桥接 Agent 接口（仅查看 / 本机验证窗口）
+## Original Client Bridge Agent API (View-Only / Local Verification Window)
 
-先在本机 `GET /api/session` 获取本次服务进程的令牌，其余接口使用 `X-UUBridge-Token` 请求头。
+First call `GET /api/session` on localhost to obtain the session token for the running server process; pass it in the `X-UUBridge-Token` request header on all other endpoints.
 
-- `GET /api/status`：权限与客户端状态。
-- `GET /api/windows`：可选 UU / 验证窗口。
-- `POST /api/select`，`{"windowId":123}`：选定窗口，返回 `selectedId` 和 `selectionVersion`。
-- `GET /api/frame?windowId=123&selectionVersion=1`：JPEG 截图，不落盘；响应头包含目标 ID 和版本。
-- `POST /api/input`：仅供自带验证窗口使用。每次携带选定的 `windowId`、`selectionVersion`；`x`、`y` 是相对采集窗口的 0–1 坐标。选择已被其他页面改变时拒绝输入；真实 UU 返回 `UU_INPUT_UNSUPPORTED`。
-- `POST /api/release`：携带当前 `windowId`、`selectionVersion`，释放鼠标并使该选择版本失效，阻止页面关闭后迟到的输入；继续操作需重新选择或读取最新版本。
+- `GET /api/status`: Permission and client status.
+- `GET /api/windows`: Selectable UU / verification windows.
+- `POST /api/select`, `{"windowId":123}`: Select a target window; returns `selectedId` and `selectionVersion`.
+- `GET /api/frame?windowId=123&selectionVersion=1`: JPEG screenshot in memory (never written to disk); response headers include target ID and selection version.
+- `POST /api/input`: Available exclusively for the built-in verification window. Every request carries the selected `windowId` and `selectionVersion`; `x` and `y` are `0–1` coordinates relative to the captured window. Rejects input if selection was changed by another page; real UU windows return `UU_INPUT_UNSUPPORTED`.
+- `POST /api/release`: Carries current `windowId` and `selectionVersion`, releases mouse buttons, and invalidates that selection version to block late-arriving inputs after page close; re-select or read the latest version to continue operating.
 
-例如点击：`{"windowId":123,"selectionVersion":1,"type":"click","x":0.5,"y":0.5,"button":"left"}`；文字、按键同样携带目标字段，再使用 `{"type":"text","text":"你好"}` 或 `{"type":"key","key":"Enter"}`。只提供发出指令的结果，不代表远端任务已完成；Agent 需要重新获取截图确认。
+Example click payload: `{"windowId":123,"selectionVersion":1,"type":"click","x":0.5,"y":0.5,"button":"left"}`; text and key inputs carry the same target fields along with `{"type":"text","text":"你好"}` or `{"type":"key","key":"Enter"}`. Responses report command dispatch only and do not guarantee remote task completion; Agents must fetch a new screenshot to confirm.
 
-## 实现与边界
+## Implementation & Boundaries
 
-原客户端桥接使用 Swift + ScreenCaptureKit 单窗口截图、Core Graphics 验证窗口输入、Node 内置 HTTP 服务和原生网页。画面按需采集，默认约每 500ms 拉取一次，没有音频或高帧率串流。该桥接没有复制第三方实现；独立协议版主控保留上游 MIT 代码和目录结构。
+The original client bridge uses Swift + `ScreenCaptureKit` single-window capture, Core Graphics input for the verification window, Node's built-in HTTP server, and vanilla frontend pages. Frames are captured on demand (pulled roughly every 500ms by default), with no audio or high-frame-rate streaming. This bridge copies no third-party implementation; the standalone protocol controller preserves upstream MIT code and directory structure.
 
-采集窗口缩放保持比例，忽略阴影，输入按原始窗口坐标映射。窗口关闭、最小化、调整大小、UU 隐私模式或系统权限变化可能影响采集。后台合成事件与 UU 转发到远端的能力需单独验证，不能由本地验证窗口结果推定。
+Captured windows preserve aspect ratio while ignoring window shadows, mapping input coordinates back to the original window bounds. Window close, minimize, resize, UU privacy mode, or OS permission changes may affect capture. Background synthetic events and UU's forwarding behavior to remote hosts must be verified separately and cannot be inferred from local verification window results.
 
-后台鼠标定位需要 Apple 未公开的 `CGEventSetWindowLocation` SPI 和事件窗口字段（参考 [WebKit 测试接口声明](https://github.com/WebKit/WebKit/blob/main/Tools/TestRunnerShared/spi/CoreGraphicsTestSPI.h)）。动态检查接口是否存在；不可用时明确报错。该做法在本机实测可用，但系统升级可能影响兼容性。没有复制或嵌入 WebKit 源码。
+Background mouse positioning requires Apple's undocumented `CGEventSetWindowLocation` SPI and event window fields (referencing [WebKit test SPI declarations](https://github.com/WebKit/WebKit/blob/main/Tools/TestRunnerShared/spi/CoreGraphicsTestSPI.h)). Availability is checked dynamically at runtime with explicit errors if absent. Verified working locally, though future macOS releases may affect compatibility. No WebKit source code is copied or embedded.
 
-参考官方接口文档：[ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit)、[CGEvent](https://developer.apple.com/documentation/coregraphics/cgevent)、[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)。
+Official API documentation references: [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit), [CGEvent](https://developer.apple.com/documentation/coregraphics/cgevent), [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
 
-## 参考项目与致谢
+## References & Acknowledgements
 
-- **[ofoz/uu_web](https://github.com/ofoz/uu_web)**（基于 **[iola1999/uurc-web](https://github.com/iola1999/uurc-web)**，MIT License）：提供本地独立运行的 UU 网页主控协议实现。本项目通过 `scripts/setup-web.mjs` 拉取到 `vendor/uu-web/` 并在外层增加本机鉴权与最小 Agent 桥接适配，完整保留上游目录结构与 `LICENSE`。
-- **[kunkundi/crossdesk](https://github.com/kunkundi/crossdesk)**（GPL-3.0 License）：本项目 `agent/` 下的 MCP 工具契约与人机协同安全设计（`observation_id` 观测绑定、`operation_id` 幂等缓存、1–8 步 `sequence` + `observe_after` 视觉等待、15 秒长按租约与一键释键、人类硬暂停不可越权）**仅参考其架构与协议思路，完全独立从零以 Node.js 实现，未复制、移植或链接任何 CrossDesk 源代码**。
-- **[WebKit CoreGraphicsTestSPI.h](https://github.com/WebKit/WebKit/blob/main/Tools/TestRunnerShared/spi/CoreGraphicsTestSPI.h)**：仅参考其声明的 macOS 私有 SPI 函数签名，未复制或嵌入任何 WebKit 源码。
+- **[ofoz/uu_web](https://github.com/ofoz/uu_web)** (based on **[iola1999/uurc-web](https://github.com/iola1999/uurc-web)**, MIT License): Provides the standalone local UU web controller protocol implementation. Fetched into `vendor/uu-web/` via `scripts/setup-web.mjs` with outer localhost authentication and minimal Agent bridge adaptations, preserving the upstream directory structure and `LICENSE` in full.
+- **[kunkundi/crossdesk](https://github.com/kunkundi/crossdesk)** (GPL-3.0 License): The MCP tool contracts and human-in-the-loop safety mechanisms under `agent/` (`observation_id` observation binding, `operation_id` idempotency cache, 1–8 step `sequence` + `observe_after` visual waiting, 15-second hold leases with one-click input release, and non-overridable human hard pause) **reference its architecture and protocol concepts only, and are implemented completely from scratch in Node.js without copying, porting, or linking any CrossDesk source code**.
+- **[WebKit CoreGraphicsTestSPI.h](https://github.com/WebKit/WebKit/blob/main/Tools/TestRunnerShared/spi/CoreGraphicsTestSPI.h)**: Referenced solely for declared macOS private SPI function signatures; no WebKit source code is copied or embedded.
 
-## 开源协议与免责声明
+## License & Disclaimer
 
-- **许可证**：本仓库原创代码与文档（`agent/`、`skills/`、`server.mjs`、`public/`、`native/`、`scripts/`、`integration/`、`test/`）采用 **[MIT License](LICENSE)** 开源；拉取至 `vendor/uu-web/` 的第三方网页主控遵循其原有的 MIT 许可证。
-- **非官方声明**：本项目为个人开源实验与本地工具，与网易 UU 远程官方无任何隶属、合作或授权关系。
-- **合规与安全边界**：仅限个人学习及在已获得明确授权的设备上本地使用（默认仅监听 `127.0.0.1`），不提取官方客户端凭证、不绕过系统权限授权。请勿将本工具用于未授权的远程访问，使用者需自行遵守当地法律法规及第三方软件服务条款。
+- **License**: Original code and documentation in this repository (`agent/`, `skills/`, `server.mjs`, `public/`, `native/`, `scripts/`, `integration/`, `test/`) are open-sourced under the **[MIT License](LICENSE)**; third-party web controller code fetched into `vendor/uu-web/` remains under its original MIT License.
+- **Unofficial Statement**: This project is an independent personal open-source experiment and local utility, with no affiliation, partnership, or authorization from NetEase UU Remote.
+- **Compliance & Security Boundaries**: Strictly for personal study and local use on devices with explicit authorization (listens only on `127.0.0.1` by default). Never extracts official client credentials or bypasses OS permission prompts. Do not use this tool for unauthorized remote access; users are responsible for complying with local laws, regulations, and third-party terms of service.
